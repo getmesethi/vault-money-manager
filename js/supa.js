@@ -24,7 +24,10 @@ const Supa = (() => {
     client.auth.onAuthStateChange((event, session) => cb(event, session));
   }
   async function signUpEmail(email, password) {
-    const { data, error } = await client.auth.signUp({ email, password });
+    const { data, error } = await client.auth.signUp({
+      email, password,
+      options: { emailRedirectTo: window.location.origin + window.location.pathname }
+    });
     if (error) throw error;
     return data;
   }
