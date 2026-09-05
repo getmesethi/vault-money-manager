@@ -1,0 +1,14 @@
+{
+  "exportedAt": "2026-09-05T06:17:37.350Z",
+  "app": "vault-money-manager",
+  "version": 2,
+  "household": "SAV Test Household",
+  "data": {
+    "accounts": [],
+    "categories": [],
+    "transactions": [],
+    "budgets": [],
+    "recurring": [],
+    "upiIds": []
+  }
+}

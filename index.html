@@ -1,0 +1,321 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>Vault &mdash; Money Manager</title>
+<meta name="theme-color" content="#4f5bd5">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Vault">
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icons/icon-192.png">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+<!-- ============ TOAST ============ -->
+<div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+<!-- ============ AUTH SCREEN (Supabase sign in / sign up) ============ -->
+<section id="view-auth" class="screen auth-screen hidden">
+  <div class="auth-wrap">
+    <div class="auth-logo">💰</div>
+    <h1 id="auth-title">Welcome to Vault</h1>
+    <p class="muted">Your household's shared money tracker, synced securely online.</p>
+
+    <div class="tab-row" style="margin-top:18px;">
+      <button class="tab-btn active" id="auth-tab-signin">Sign In</button>
+      <button class="tab-btn" id="auth-tab-signup">Sign Up</button>
+    </div>
+
+    <div class="auth-step">
+      <button class="btn btn-ghost btn-block" id="btn-google-signin" style="margin-top:16px;">🔵 Continue with Google</button>
+      <div style="display:flex;align-items:center;gap:10px;margin:18px 0;color:var(--text-faint);font-size:12.5px;">
+        <div style="flex:1;height:1px;background:var(--border);"></div>or<div style="flex:1;height:1px;background:var(--border);"></div>
+      </div>
+      <label class="field-label">Email</label>
+      <input id="auth-email" class="input" type="email" placeholder="you@example.com" autocomplete="email">
+      <label class="field-label">Password</label>
+      <input id="auth-password" class="input" type="password" placeholder="••••••••" autocomplete="current-password">
+      <p class="muted" id="auth-hint" style="margin-top:8px;font-size:12.5px;"></p>
+      <p class="error-text hidden" id="auth-error"></p>
+      <button class="btn btn-primary btn-block" id="auth-submit" style="margin-top:14px;">Sign In</button>
+      <button class="btn btn-text" id="auth-forgot" style="display:block;margin:6px auto 0;">Forgot password?</button>
+    </div>
+  </div>
+</section>
+
+<!-- ============ HOUSEHOLD SCREEN (create / join after first login) ============ -->
+<section id="view-household-setup" class="screen auth-screen hidden">
+  <div class="auth-wrap">
+    <div class="auth-logo">🏡</div>
+    <h1>Set Up Your Household</h1>
+    <p class="muted">All accounts, transactions and budgets are shared within a household. Create a new one, or join a partner's with their code.</p>
+
+    <div class="tab-row" style="margin-top:18px;">
+      <button class="tab-btn active" id="hh-tab-create">Create New</button>
+      <button class="tab-btn" id="hh-tab-join">Join Existing</button>
+    </div>
+
+    <div id="hh-step-create" class="auth-step">
+      <label class="field-label">Household Name</label>
+      <input id="hh-name" class="input" placeholder="e.g. The Sethi Household" maxlength="60">
+      <button class="btn btn-primary btn-block" id="hh-create-btn" style="margin-top:16px;">Create Household</button>
+    </div>
+    <div id="hh-step-join" class="auth-step hidden">
+      <label class="field-label">Join Code</label>
+      <input id="hh-code" class="input" placeholder="e.g. A1B2C3" maxlength="6" style="text-transform:uppercase;letter-spacing:.1em;font-weight:800;text-align:center;font-size:20px;">
+      <button class="btn btn-primary btn-block" id="hh-join-btn" style="margin-top:16px;">Join Household</button>
+    </div>
+    <p class="error-text hidden" id="hh-error"></p>
+    <button class="btn btn-text" id="hh-signout">Sign out</button>
+  </div>
+</section>
+
+<!-- ============ MIGRATION SCREEN (import old local vault, if found) ============ -->
+<section id="view-migrate" class="screen auth-screen hidden">
+  <div class="auth-wrap">
+    <div class="auth-logo">📦</div>
+    <h1>Import Local Data?</h1>
+    <p class="muted">This browser has an older, device-only version of your data (from before cloud sync). Enter its PIN to import everything into your new household, or skip and start fresh online.</p>
+    <div class="pin-dots" id="pin-dots-migrate"></div>
+    <div class="keypad" id="keypad-migrate"></div>
+    <p class="error-text hidden" id="migrate-error"></p>
+    <button class="btn btn-text btn-block" id="migrate-skip" style="margin-top:10px;">Skip — start fresh online</button>
+  </div>
+</section>
+
+<!-- ============ LOCK SCREEN ============ -->
+<section id="view-lock" class="screen auth-screen hidden">
+  <div class="auth-wrap">
+    <div class="auth-logo">🔒</div>
+    <h1>Welcome Back</h1>
+    <p class="muted" id="lock-subtitle">Enter your PIN to unlock</p>
+    <div class="pin-dots" id="pin-dots-unlock"></div>
+    <p class="error-text hidden" id="lock-error">Incorrect PIN. Please try again.</p>
+    <div class="keypad" id="keypad-lock"></div>
+    <button class="btn btn-ghost btn-block hidden" id="btn-biometric-unlock">👆 Unlock with Biometrics</button>
+    <button class="btn btn-text" id="btn-forgot-pin">Forgot PIN? Sign in again</button>
+  </div>
+</section>
+
+<!-- ============ SET DEVICE PIN (once, right after first login on a device) ============ -->
+<section id="view-setup-pin" class="screen auth-screen hidden">
+  <div class="auth-wrap">
+    <div class="auth-logo">🔢</div>
+    <h1>Quick-Unlock PIN</h1>
+    <p class="muted">Set a 6-digit PIN so you don't have to log in every time you open the app on this device. This is local to this device only — your real account is still your email/password or Google login.</p>
+    <p class="field-label" id="devpin-label">Create a 6-digit PIN</p>
+    <div class="pin-dots" id="pin-dots-devcreate"></div>
+    <div id="devpin-confirm-wrap" class="hidden">
+      <p class="field-label">Confirm PIN</p>
+      <div class="pin-dots" id="pin-dots-devconfirm"></div>
+    </div>
+    <div class="keypad" id="keypad-devpin"></div>
+    <p class="error-text hidden" id="devpin-error"></p>
+    <button class="btn btn-text btn-block" id="devpin-skip" style="margin-top:10px;">Skip for now</button>
+  </div>
+</section>
+
+<!-- ============ APP SHELL ============ -->
+<div id="app-shell" class="hidden">
+
+  <!-- TOP BAR -->
+  <header class="topbar">
+    <button class="icon-btn" id="btn-menu" aria-label="Menu">☰</button>
+    <div class="topbar-title" id="topbar-title">Dashboard</div>
+    <div class="topbar-actions">
+      <button class="icon-btn" id="btn-search" aria-label="Search">🔍</button>
+      <button class="icon-btn" id="btn-notifications" aria-label="Notifications">🔔<span class="badge-dot hidden" id="notif-dot"></span></button>
+      <button class="icon-btn" id="btn-calendar" aria-label="Calendar">📅</button>
+      <button class="icon-btn" id="btn-settings-quick" aria-label="Settings">⚙️</button>
+    </div>
+  </header>
+
+  <main id="main-content" class="main-content">
+
+    <!-- ---------- HOME VIEW ---------- -->
+    <section id="view-home" class="view">
+      <div class="time-filter-row" id="time-filter-row"></div>
+
+      <div class="summary-scroller" id="summary-scroller"></div>
+      <div class="scroller-dots" id="summary-dots"></div>
+
+      <div class="section-head">
+        <h2>Categories</h2>
+        <button class="link-btn" id="btn-manage-categories">Manage</button>
+      </div>
+      <div class="category-grid" id="category-grid"></div>
+
+      <div class="section-head">
+        <h2>Expense Distribution</h2>
+      </div>
+      <div class="chart-card" id="chart-donut-card"></div>
+
+      <div class="section-head">
+        <h2>Monthly Trend</h2>
+      </div>
+      <div class="chart-card" id="chart-bar-card"></div>
+
+      <div class="section-head">
+        <h2>Income vs Expense</h2>
+      </div>
+      <div class="chart-card" id="chart-compare-card"></div>
+
+      <div class="bottom-spacer"></div>
+    </section>
+
+    <!-- ---------- TRANSACTIONS VIEW ---------- -->
+    <section id="view-transactions" class="view hidden">
+      <div class="filter-chip-row" id="txn-filter-row"></div>
+      <div id="txn-list" class="txn-list"></div>
+      <div class="bottom-spacer"></div>
+    </section>
+
+    <!-- ---------- ANALYTICS VIEW ---------- -->
+    <section id="view-analytics" class="view hidden">
+      <div class="tab-row" id="analytics-tabs">
+        <button class="tab-btn active" data-tab="charts">Charts</button>
+        <button class="tab-btn" data-tab="budgets">Budgets</button>
+        <button class="tab-btn" data-tab="recurring">Recurring</button>
+        <button class="tab-btn" data-tab="reports">Reports</button>
+      </div>
+      <div id="analytics-charts" class="analytics-pane"></div>
+      <div id="analytics-budgets" class="analytics-pane hidden"></div>
+      <div id="analytics-recurring" class="analytics-pane hidden"></div>
+      <div id="analytics-reports" class="analytics-pane hidden"></div>
+      <div class="bottom-spacer"></div>
+    </section>
+
+    <!-- ---------- MORE VIEW ---------- -->
+    <section id="view-more" class="view hidden">
+      <div id="more-list" class="more-list"></div>
+      <div class="bottom-spacer"></div>
+    </section>
+
+    <!-- ---------- SUB-PAGE (category detail / account detail / generic) ---------- -->
+    <section id="view-subpage" class="view hidden">
+      <div id="subpage-content"></div>
+      <div class="bottom-spacer"></div>
+    </section>
+
+  </main>
+
+  <!-- BOTTOM NAV -->
+  <nav class="bottom-nav">
+    <button class="nav-btn active" data-nav="home"><span class="nav-ico">🏠</span><span>Dashboard</span></button>
+    <button class="nav-btn" data-nav="transactions"><span class="nav-ico">📜</span><span>Transactions</span></button>
+    <button class="nav-fab" id="btn-add-fab"><span>+</span></button>
+    <button class="nav-btn" data-nav="analytics"><span class="nav-ico">📊</span><span>Analytics</span></button>
+    <button class="nav-btn" data-nav="more"><span class="nav-ico">⋯</span><span>More</span></button>
+  </nav>
+
+  <!-- AI ASSISTANT -->
+  <button class="ai-fab" id="btn-ai-fab" aria-label="Assistant">🤖</button>
+  <div id="ai-overlay" class="ai-overlay hidden">
+    <div class="ai-panel">
+      <div class="ai-head">
+        <div class="ai-head-title">🤖 Assistant</div>
+        <button class="icon-btn" id="btn-ai-close">✕</button>
+      </div>
+      <div id="ai-messages" class="ai-messages">
+        <div class="ai-msg ai-msg-bot">Hi! Ask me things like "how much did I spend on groceries this month?" or say "add ₹200 cash expense for dinner" and I'll log it for you.</div>
+      </div>
+      <div class="ai-input-row">
+        <input id="ai-input" class="input" placeholder="Ask or tell me to add a transaction…">
+        <button class="btn btn-primary" id="ai-send">➤</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- SIDE DRAWER -->
+  <div id="drawer-overlay" class="overlay hidden"></div>
+  <aside id="drawer" class="drawer">
+    <div class="drawer-head">
+      <div class="avatar" id="drawer-avatar">🙂</div>
+      <div>
+        <div class="drawer-name" id="drawer-name">Hello</div>
+        <div class="drawer-sub">Your Vault</div>
+      </div>
+    </div>
+    <button class="drawer-item" data-nav="home">🏠 Dashboard</button>
+    <button class="drawer-item" data-nav="transactions">📜 Transactions</button>
+    <button class="drawer-item" data-nav="analytics">📊 Analytics</button>
+    <button class="drawer-item" data-drawer="accounts">🏦 Accounts</button>
+    <button class="drawer-item" data-drawer="categories">🗂️ Categories</button>
+    <button class="drawer-item" data-drawer="upi">📱 UPI IDs</button>
+    <button class="drawer-item" data-drawer="household">🏡 Household</button>
+    <button class="drawer-item" data-drawer="backup">💾 Backup &amp; Restore</button>
+    <button class="drawer-item" data-nav="more">⚙️ Settings &amp; More</button>
+    <button class="drawer-item drawer-lock" id="btn-lock-now">🔒 Lock Now</button>
+    <button class="drawer-item drawer-lock" id="btn-sign-out">🚪 Sign Out</button>
+  </aside>
+
+  <!-- SEARCH OVERLAY -->
+  <div id="search-overlay" class="overlay-panel hidden">
+    <div class="overlay-panel-head">
+      <input id="search-input" class="input" placeholder="Search transactions, category, amount, UPI ID…">
+      <button class="icon-btn" id="btn-search-close">✕</button>
+    </div>
+    <div id="search-results" class="txn-list"></div>
+  </div>
+
+  <!-- NOTIFICATIONS OVERLAY -->
+  <div id="notif-overlay" class="overlay-panel hidden">
+    <div class="overlay-panel-head">
+      <h3>Notifications</h3>
+      <button class="icon-btn" id="btn-notif-close">✕</button>
+    </div>
+    <div id="notif-list" class="notif-list"></div>
+  </div>
+
+  <!-- CALENDAR / TIME RANGE OVERLAY -->
+  <div id="calendar-overlay" class="overlay-panel hidden">
+    <div class="overlay-panel-head">
+      <h3>Select Period</h3>
+      <button class="icon-btn" id="btn-calendar-close">✕</button>
+    </div>
+    <div id="calendar-body" class="sheet-body"></div>
+  </div>
+
+  <!-- ADD TRANSACTION SHEET -->
+  <div id="txn-sheet-overlay" class="overlay hidden"></div>
+  <div id="txn-sheet" class="sheet">
+    <div class="sheet-handle"></div>
+    <div id="txn-sheet-body" class="sheet-body"></div>
+  </div>
+
+  <!-- GENERIC MODAL (confirm dialogs, editors) -->
+  <div id="modal-overlay" class="overlay hidden"></div>
+  <div id="modal" class="modal">
+    <div id="modal-body"></div>
+  </div>
+
+  <!-- SUCCESS ANIMATION -->
+  <div id="success-overlay" class="success-overlay hidden">
+    <div class="success-card">
+      <div class="success-check">✓</div>
+      <div id="success-text"></div>
+    </div>
+  </div>
+
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
+<script src="js/crypto.js"></script>
+<script src="js/webauthn.js"></script>
+<script src="js/model.js"></script>
+<script src="js/supa.js"></script>
+<script src="js/store.js"></script>
+<script src="js/charts.js"></script>
+<script src="js/app.js"></script>
+<script>
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}));
+  }
+</script>
+</body>
+</html>
