@@ -46,6 +46,12 @@ const Model = (() => {
     { name: 'Credit Card', type: 'financial', color: 'pal-2', icon: '💳' },
     { name: 'Debt', type: 'financial', color: 'pal-5', icon: '⚠️' },
     { name: 'EMI', type: 'financial', color: 'pal-4', icon: '🧾' },
+    // Money Borrowed
+    { name: 'Family Loan', type: 'borrow', color: 'pal-2', icon: '🤝' },
+    { name: 'Personal Loan', type: 'borrow', color: 'pal-6', icon: '🏦' },
+    // Money Lent
+    { name: 'Friend', type: 'lend', color: 'pal-3', icon: '🤲' },
+    { name: 'Personal Lending', type: 'lend', color: 'pal-8', icon: '💸' },
   ];
 
   const PALETTE = ['pal-0','pal-1','pal-2','pal-3','pal-4','pal-5','pal-6','pal-7','pal-8','pal-9'];
@@ -150,12 +156,20 @@ const Model = (() => {
     return transactions.filter(t => inRange(t.date, range));
   }
 
+  // Four transaction types: 'credit' (Income) and 'debit' (Expense) are the
+  // true profit/loss movements — Income/Expense/Savings stats only ever look
+  // at these two. 'borrow' (Money Borrowed) and 'lend' (Money Lent) are real
+  // cash movements too (borrowing puts cash in your hand, lending takes it
+  // out) but are NOT income or expense — they create a debt either way, so
+  // they're tracked separately and never inflate the Income/Expense totals.
   function sumCredit(transactions) { return transactions.filter(t => t.type === 'credit').reduce((s, t) => s + t.amount, 0); }
   function sumDebit(transactions) { return transactions.filter(t => t.type === 'debit').reduce((s, t) => s + t.amount, 0); }
+  function sumBorrow(transactions) { return transactions.filter(t => t.type === 'borrow').reduce((s, t) => s + t.amount, 0); }
+  function sumLend(transactions) { return transactions.filter(t => t.type === 'lend').reduce((s, t) => s + t.amount, 0); }
 
   function accountBalance(account, transactions) {
     const own = transactions.filter(t => t.accountId === account.id);
-    return account.openingBalance + sumCredit(own) - sumDebit(own);
+    return account.openingBalance + sumCredit(own) - sumDebit(own) + sumBorrow(own) - sumLend(own);
   }
 
   function totalBalance(accounts, transactions) {
@@ -167,11 +181,11 @@ const Model = (() => {
 
   function categoryTotal(categoryId, transactions, range) {
     const list = txnsInRange(transactions, range).filter(t => t.categoryId === categoryId);
-    return sumCredit(list) - 0 + sumDebit(list); // magnitude shown on card = total activity
+    return sumCredit(list) + sumDebit(list) + sumBorrow(list) + sumLend(list); // magnitude shown on card = total activity, all 4 types
   }
   function categoryNet(categoryId, transactions, range) {
     const list = txnsInRange(transactions, range).filter(t => t.categoryId === categoryId);
-    return sumCredit(list) - sumDebit(list);
+    return sumCredit(list) + sumBorrow(list) - sumDebit(list) - sumLend(list);
   }
 
   function creditDebtOutstanding(accounts, categories, transactions) {
@@ -181,7 +195,8 @@ const Model = (() => {
     const debtCats = categories.filter(c => ['Loans', 'Debt', 'EMI'].includes(c.name)).map(c => c.id);
     let catDebt = 0;
     debtCats.forEach(id => { const net = categoryNet(id, transactions, null); if (net < 0) catDebt += -net; });
-    return ccDebt + catDebt;
+    const borrowed = sumBorrow(transactions); // money borrowed is a real debt you owe back
+    return ccDebt + catDebt + borrowed;
   }
 
   function investmentTotal(categories, transactions) {
@@ -250,7 +265,7 @@ const Model = (() => {
     uid, DEFAULT_CATEGORIES, PALETTE, ICON_CHOICES, PAYMENT_METHODS, ACCOUNT_TYPES,
     defaultCategories, emptyData, seedAccount,
     todayStr, fmtDate, nowTime, parseDate, humanDate, humanDateShort, humanTime, monthKey, monthLabel,
-    rangeForPeriod, inRange, txnsInRange, sumCredit, sumDebit,
+    rangeForPeriod, inRange, txnsInRange, sumCredit, sumDebit, sumBorrow, sumLend,
     accountBalance, totalBalance, categoryTotal, categoryNet, creditDebtOutstanding, investmentTotal,
     expenseByCategory, monthlySeries, budgetSpent, isValidUpi, currencyFmt
   };

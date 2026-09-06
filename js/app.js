@@ -652,21 +652,25 @@ function renderSummaryScroller() {
 
 function periodLabel() { const p = PERIODS.find(p => p.id === S.period); return p ? p.label : ''; }
 
-function renderCategoryGrid() {
-  const data = D();
-  const range = currentRange();
-  const cats = data.categories.filter(c => !c.archived).sort((a, b) => a.order - b.order);
-  const grid = $('#category-grid');
-  grid.innerHTML = cats.map(c => {
-    const total = M.categoryTotal(c.id, data.transactions, range);
-    const budget = data.budgets.find(b => b.categoryId === c.id);
-    let badge = '';
-    if (budget && c.type === 'expense') {
-      const spent = M.budgetSpent(c.id, data.transactions);
-      const pct = budget.amount > 0 ? spent / budget.amount : 0;
-      if (pct >= 1) badge = '🔴'; else if (pct >= 0.85) badge = '⚠️';
-    }
-    return `
+const CATEGORY_TYPE_SECTIONS = [
+  { type: 'income', label: 'Income' },
+  { type: 'expense', label: 'Expense' },
+  { type: 'borrow', label: 'Money Borrowed' },
+  { type: 'lend', label: 'Money Lent' },
+  { type: 'financial', label: 'Savings, Investments & Other' },
+];
+const CAT_TYPE_TO_TXN_TYPE = { income: 'credit', expense: 'debit', borrow: 'borrow', lend: 'lend', financial: 'debit' };
+
+function catCardHtml(c, data, range) {
+  const total = M.categoryTotal(c.id, data.transactions, range);
+  const budget = data.budgets.find(b => b.categoryId === c.id);
+  let badge = '';
+  if (budget && c.type === 'expense') {
+    const spent = M.budgetSpent(c.id, data.transactions);
+    const pct = budget.amount > 0 ? spent / budget.amount : 0;
+    if (pct >= 1) badge = '🔴'; else if (pct >= 0.85) badge = '⚠️';
+  }
+  return `
     <div class="cat-card ${c.color}" data-cat="${c.id}">
       ${badge ? `<span class="cat-badge">${badge}</span>` : ''}
       <div class="cat-ico">${c.icon}</div>
@@ -679,7 +683,22 @@ function renderCategoryGrid() {
         <button class="cat-btn" data-act="plus" data-cat="${c.id}">+</button>
       </div>
     </div>`;
-  }).join('') + `<div class="cat-card add-card" id="cat-add-card">+</div>`;
+}
+
+function renderCategoryGrid() {
+  const data = D();
+  const range = currentRange();
+  const cats = data.categories.filter(c => !c.archived).sort((a, b) => a.order - b.order);
+  const grid = $('#category-grid');
+
+  let html = '';
+  CATEGORY_TYPE_SECTIONS.forEach(section => {
+    const list = cats.filter(c => c.type === section.type);
+    if (!list.length) return;
+    html += `<div class="sep-title">${section.label}</div><div class="category-grid">${list.map(c => catCardHtml(c, data, range)).join('')}</div>`;
+  });
+  html += `<div class="category-grid"><div class="cat-card add-card" id="cat-add-card">+</div></div>`;
+  grid.innerHTML = html;
 
   $all('.cat-card[data-cat]', grid).forEach(card => {
     card.addEventListener('click', (e) => {
@@ -691,7 +710,7 @@ function renderCategoryGrid() {
   $all('.cat-btn[data-act="plus"]', grid).forEach(b => b.onclick = (e) => {
     e.stopPropagation();
     const cat = data.categories.find(c => c.id === b.dataset.cat);
-    openTxnSheet({ type: cat.type === 'income' ? 'credit' : 'debit', categoryId: cat.id });
+    openTxnSheet({ type: CAT_TYPE_TO_TXN_TYPE[cat.type] || 'debit', categoryId: cat.id });
   });
   $all('.cat-btn[data-act="minus"]', grid).forEach(b => b.onclick = (e) => {
     e.stopPropagation();
@@ -737,9 +756,11 @@ function openTxnSheet(opts) {
   $('#txn-sheet-body').innerHTML = `
     <div class="staggered">
       <h3 style="margin:6px 0 2px;">${editing ? 'Edit Transaction' : (isReversal ? 'Remove / Reverse Transaction' : 'Add Transaction')}</h3>
-      <div class="type-toggle">
-        <button type="button" class="type-btn income ${type === 'credit' ? 'active' : ''}" data-type="credit">🟢 INCOME</button>
-        <button type="button" class="type-btn expense ${type === 'debit' ? 'active' : ''}" data-type="debit">🔴 EXPENSE</button>
+      <div class="type-toggle type-toggle-4">
+        <button type="button" class="type-btn income ${type === 'credit' ? 'active' : ''}" data-type="credit">🟢 Income</button>
+        <button type="button" class="type-btn expense ${type === 'debit' ? 'active' : ''}" data-type="debit">🔴 Expense</button>
+        <button type="button" class="type-btn borrow ${type === 'borrow' ? 'active' : ''}" data-type="borrow">🔵 Borrowed</button>
+        <button type="button" class="type-btn lend ${type === 'lend' ? 'active' : ''}" data-type="lend">🟣 Lent</button>
       </div>
 
       <label class="field-label">Amount</label>
@@ -785,8 +806,22 @@ function openTxnSheet(opts) {
     </div>`;
 
   function populateCategories(t) {
-    const filtered = cats.filter(c => (t === 'credit' ? c.type === 'income' : c.type !== 'income'));
-    $('#tf-category').innerHTML = filtered.map(c => `<option value="${c.id}">${c.icon} ${c.name}</option>`).join('');
+    let filtered = cats.filter(c => {
+      if (t === 'credit') return c.type === 'income';
+      if (t === 'borrow') return c.type === 'borrow';
+      if (t === 'lend') return c.type === 'lend';
+      return c.type === 'expense' || c.type === 'financial'; // debit: expense + legacy financial categories
+    });
+    // A reversal (or an edit whose category type doesn't match the "opposite" filter,
+    // e.g. reversing a Borrowed-category entry) must still be able to target its own
+    // category, even if that category's type wouldn't normally show under this toggle.
+    const forcedId = opts.categoryId || (editing && editing.categoryId);
+    if (forcedId && !filtered.some(c => c.id === forcedId)) {
+      const forced = cats.find(c => c.id === forcedId);
+      if (forced) filtered = [forced, ...filtered];
+    }
+    $('#tf-category').innerHTML = filtered.length ? filtered.map(c => `<option value="${c.id}">${c.icon} ${c.name}</option>`).join('')
+      : `<option value="">No categories yet — add one first</option>`;
     if (opts.categoryId) $('#tf-category').value = opts.categoryId;
     else if (editing) $('#tf-category').value = editing.categoryId;
   }
@@ -819,7 +854,9 @@ function openReduceSheet(categoryId) {
   $('#rr-cancel').onclick = closeModal;
   $('#rr-continue').onclick = () => {
     closeModal();
-    const reverseType = cat.type === 'income' ? 'debit' : 'credit'; // opposite entry = reversal
+    // Reversal = an offsetting entry of the opposite cash direction, in the same category.
+    const reverseMap = { income: 'debit', borrow: 'debit', expense: 'credit', financial: 'credit', lend: 'credit' };
+    const reverseType = reverseMap[cat.type] || 'credit';
     openTxnSheet({ type: reverseType, categoryId: cat.id, description: 'Reversal / refund', isReversal: true });
   };
 }
@@ -862,7 +899,7 @@ async function saveTxnFromSheet(ctx) {
       await Store.addUpi({ upiId, provider: '', linkedAccountName: '' });
     }
     closeTxnSheet();
-    showSuccess(`✓ Transaction ${ctx.editing ? 'Updated' : 'Added'}\n${fmt(amount)} ${type === 'credit' ? 'Income' : 'Expense'}`);
+    showSuccess(`✓ Transaction ${ctx.editing ? 'Updated' : 'Added'}\n${fmt(amount)} ${(TXN_TYPE_META[type] || TXN_TYPE_META.debit).label}`);
     refreshCurrentView();
   } catch (e) {
     showErr('Could not save: ' + e.message);
@@ -935,7 +972,8 @@ function mountFilterableTxnList(root, opts) {
     const range = M.rangeForPeriod(state.period, state.customRange);
     let list = opts.getTxns(range);
     if (opts.showMethodFilter && state.method !== 'all') list = list.filter(t => t.paymentMethod === state.method);
-    const total = list.reduce((s, t) => s + (t.type === 'credit' ? t.amount : -t.amount), 0);
+    const inflow = (t) => t.type === 'credit' || t.type === 'borrow';
+    const total = list.reduce((s, t) => s + (inflow(t) ? t.amount : -t.amount), 0);
     $('#' + wrapId + '-total', root).textContent = `${list.length} transaction${list.length === 1 ? '' : 's'} · ${fmt(Math.abs(total))}`;
     const sorted = sortTxns(list, state.sort);
     const byAmount = state.sort === 'high' || state.sort === 'low';
@@ -998,16 +1036,24 @@ function openCategoryDetail(categoryId) {
   });
 }
 
+// Four transaction types, one source of truth for label/sign/color everywhere.
+const TXN_TYPE_META = {
+  credit: { label: 'Income', tag: 'INCOME', sign: '+', cls: 'credit' },
+  debit: { label: 'Expense', tag: 'EXPENSE', sign: '−', cls: 'debit' },
+  borrow: { label: 'Money Borrowed', tag: 'MONEY BORROWED', sign: '+', cls: 'borrow' },
+  lend: { label: 'Money Lent', tag: 'MONEY LENT', sign: '−', cls: 'lend' },
+};
 function txnRowHtml(t) {
   const data = D();
   const cat = data.categories.find(c => c.id === t.categoryId) || { icon: '💠', color: 'pal-7', name: 'Uncategorized' };
+  const meta = TXN_TYPE_META[t.type] || TXN_TYPE_META.debit;
   return `<div class="txn-row" data-id="${t.id}">
     <div class="txn-ico ${cat.color}">${cat.icon}</div>
     <div class="txn-mid">
       <div class="txn-title">${t.description || cat.name}</div>
       <div class="txn-sub">${cat.name} · ${t.paymentMethod} · ${M.humanDateShort(t.date)}</div>
     </div>
-    <div class="txn-amt ${t.type === 'credit' ? 'credit' : 'debit'}">${t.type === 'credit' ? '+' : '−'}${fmt(t.amount)}</div>
+    <div class="txn-amt ${meta.cls}">${meta.sign}${fmt(t.amount)}</div>
   </div>`;
 }
 
@@ -1021,10 +1067,13 @@ function openTransactionDetail(txnId) {
   openSubpage('Transaction', (root) => {
     const cat = data.categories.find(c => c.id === t.categoryId) || { name: 'Uncategorized' };
     const acct = data.accounts.find(a => a.id === t.accountId) || { name: '—' };
+    const meta = TXN_TYPE_META[t.type] || TXN_TYPE_META.debit;
+    const tagColors = { credit: ['var(--green)','var(--green-bg)'], debit: ['var(--red)','var(--red-bg)'], borrow: ['var(--blue)','var(--blue-bg)'], lend: ['var(--purple)','var(--purple-bg)'] };
+    const [tColor, tBg] = tagColors[t.type] || tagColors.debit;
     root.innerHTML = `
       <div class="txn-detail-amt">
-        <div class="tda-num" style="color:${t.type==='credit'?'var(--green)':'var(--red)'}">${t.type === 'credit' ? '+' : '−'}${fmt(t.amount)}</div>
-        <div class="tda-tag" style="background:${t.type==='credit'?'var(--green-bg)':'var(--red-bg)'};color:${t.type==='credit'?'var(--green)':'var(--red)'}">${t.type === 'credit' ? 'CREDIT' : 'DEBIT'}${t.isReversal ? ' · REVERSAL' : ''}</div>
+        <div class="tda-num" style="color:${tColor}">${meta.sign}${fmt(t.amount)}</div>
+        <div class="tda-tag" style="background:${tBg};color:${tColor}">${meta.tag}${t.isReversal ? ' · REVERSAL' : ''}</div>
       </div>
       <div class="kv-list">
         <div class="kv-row"><span class="kv-k">Category</span><span class="kv-v">${cat.name}</span></div>
@@ -1052,7 +1101,8 @@ function openTransactionDetail(txnId) {
 // TRANSACTIONS VIEW (list, grouped, filterable)
 // ===========================================================
 const TXN_FILTERS = [
-  { id: 'all', label: 'All' }, { id: 'credit', label: 'Credit' }, { id: 'debit', label: 'Debit' },
+  { id: 'all', label: 'All' }, { id: 'credit', label: 'Income' }, { id: 'debit', label: 'Expense' },
+  { id: 'borrow', label: 'Borrowed' }, { id: 'lend', label: 'Lent' },
   { id: 'Cash', label: 'Cash' }, { id: 'UPI', label: 'UPI' }, { id: 'Card', label: 'Card' }, { id: 'Bank', label: 'Bank' },
 ];
 function renderTransactionsView() {
@@ -1068,6 +1118,8 @@ function matchesFilter(t, kind) {
   if (kind === 'all') return true;
   if (kind === 'credit') return t.type === 'credit';
   if (kind === 'debit') return t.type === 'debit';
+  if (kind === 'borrow') return t.type === 'borrow';
+  if (kind === 'lend') return t.type === 'lend';
   if (kind === 'Card') return t.paymentMethod === 'Debit Card' || t.paymentMethod === 'Credit Card';
   if (kind === 'Bank') return t.paymentMethod === 'Bank Transfer' || t.paymentMethod === 'Cheque';
   return t.paymentMethod === kind;
@@ -1859,7 +1911,9 @@ function openCategoryEditor(catId, onDone) {
     <select class="input" id="cg-type">
       <option value="income" ${existing&&existing.type==='income'?'selected':''}>Income</option>
       <option value="expense" ${existing&&existing.type==='expense'?'selected':''}>Expense</option>
-      <option value="financial" ${existing&&existing.type==='financial'?'selected':''}>Financial</option>
+      <option value="borrow" ${existing&&existing.type==='borrow'?'selected':''}>Money Borrowed</option>
+      <option value="lend" ${existing&&existing.type==='lend'?'selected':''}>Money Lent</option>
+      <option value="financial" ${existing&&existing.type==='financial'?'selected':''}>Other (Savings/Investments/Credit Card)</option>
     </select>
     <label class="field-label">Color</label>
     <div class="swatch-row" id="cg-colors">${M.PALETTE.map(p=>`<div class="swatch ${p} ${existing&&existing.color===p?'selected':(!existing&&p==='pal-2'?'selected':'')}" data-c="${p}"></div>`).join('')}</div>

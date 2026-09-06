@@ -234,6 +234,8 @@ input,select,textarea{ font-family:inherit; }
 .txn-amt{ font-weight:800; font-size:15px; white-space:nowrap; }
 .txn-amt.credit{ color:var(--green); }
 .txn-amt.debit{ color:var(--red); }
+.txn-amt.borrow{ color:var(--blue); }
+.txn-amt.lend{ color:var(--purple); }
 
 /* =========================== Tabs (analytics) =========================== */
 .tab-row{ display:flex; gap:6px; background:var(--surface-2); padding:4px; border-radius:14px; margin:12px 0; }
@@ -331,13 +333,16 @@ input,select,textarea{ font-family:inherit; }
 .sheet-body{ padding:8px 20px 28px; }
 
 .type-toggle{ display:flex; gap:12px; margin:14px 0 6px; }
+.type-toggle.type-toggle-4{ display:grid; grid-template-columns:1fr 1fr; }
 .type-btn{
-  flex:1; padding:16px; border-radius:16px; border:2px solid var(--border); background:var(--surface-2); font-weight:800;
-  font-size:15px; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:8px; color:var(--text-dim);
+  flex:1; padding:14px; border-radius:16px; border:2px solid var(--border); background:var(--surface-2); font-weight:800;
+  font-size:14px; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:8px; color:var(--text-dim);
   transition:all .15s ease;
 }
 .type-btn.income.active{ background:var(--green-bg); border-color:var(--green); color:var(--green); }
 .type-btn.expense.active{ background:var(--red-bg); border-color:var(--red); color:var(--red); }
+.type-btn.borrow.active{ background:var(--blue-bg); border-color:var(--blue); color:var(--blue); }
+.type-btn.lend.active{ background:var(--purple-bg); border-color:var(--purple); color:var(--purple); }
 .field-row-2{ display:grid; grid-template-columns:1fr 1fr; gap:12px; }
 .staggered > *{ opacity:0; animation:fadeUp .3s ease forwards; }
 .staggered > *:nth-child(1){ animation-delay:.02s; } .staggered > *:nth-child(2){ animation-delay:.05s; }
