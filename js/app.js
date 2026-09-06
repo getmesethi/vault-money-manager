@@ -17,7 +17,7 @@ const S = {
   customRange: null,
   nav: 'home',
   summaryIdx: 0,
-  txnFilter: { kind: 'all', method: 'all', categoryId: null },
+  txnFilter: { kind: 'all', method: 'all', categoryId: null, sort: 'newest' },
   subpageStack: [],
   autoLockTimer: null,
   pinBuffer: '',
@@ -45,6 +45,33 @@ function showSuccess(text) {
   $('#success-overlay').classList.add('show');
   setTimeout(() => $('#success-overlay').classList.remove('show'), 1100);
 }
+// ===========================================================
+// BACK-NAVIGATION GUARD
+// Every overlay/subpage push exactly one history entry when it
+// opens, and consumes it (history.back()) when it closes — unless
+// the close was itself triggered by a popstate (physical/browser
+// back), in which case the browser already consumed it. This makes
+// the device/browser back button close the topmost open thing
+// instead of exiting the app, without ever requiring more than one
+// back press to undo one open.
+// ===========================================================
+let _inPopHandler = false;
+function pushBackGuard() { history.pushState({ vaultUi: true }, '', location.href); }
+function consumeBackGuard() { if (!_inPopHandler) history.back(); }
+
+window.addEventListener('popstate', () => {
+  _inPopHandler = true;
+  if ($('#modal').classList.contains('open')) { closeModal(); }
+  else if (!$('#ai-overlay').classList.contains('hidden')) { closeAssistant(); }
+  else if ($('#txn-sheet').classList.contains('open')) { closeTxnSheet(); }
+  else if ($('#drawer').classList.contains('open')) { closeDrawer(); }
+  else if (!$('#search-overlay').classList.contains('hidden')) { closeSearchOverlay(); }
+  else if (!$('#notif-overlay').classList.contains('hidden')) { closeNotifOverlay(); }
+  else if (!$('#calendar-overlay').classList.contains('hidden')) { closeCalendarOverlay(); }
+  else if (S.subpageStack.length) { S.subpageStack = []; goNav(S.nav); }
+  _inPopHandler = false;
+});
+
 function openModal(html, opts) {
   $('#modal-body').innerHTML = html;
   $('#modal-overlay').classList.remove('hidden');
@@ -53,11 +80,13 @@ function openModal(html, opts) {
   if (!opts || !opts.keepOnOverlayClick) {
     $('#modal-overlay').onclick = closeModal;
   }
+  pushBackGuard();
 }
 function closeModal() {
   $('#modal').classList.remove('open');
   $('#modal-overlay').classList.remove('show');
   setTimeout(() => $('#modal-overlay').classList.add('hidden'), 200);
+  consumeBackGuard();
 }
 function confirmDialog(title, msg, okLabel, onOk, danger) {
   openModal(`
@@ -406,19 +435,23 @@ function doLock() {
 }
 
 function closeAllOverlays() {
-  $('#drawer').classList.remove('open'); $('#drawer-overlay').classList.add('hidden');
-  $('#search-overlay').classList.add('hidden');
-  $('#notif-overlay').classList.add('hidden');
-  $('#calendar-overlay').classList.add('hidden');
-  closeTxnSheet();
-  closeModal();
+  // Each close*() call consumes exactly one pushed history entry, so only
+  // call it for things that are actually open — otherwise this would
+  // consume phantom entries and desync the back-navigation guard.
+  if ($('#drawer').classList.contains('open')) closeDrawer();
+  if (!$('#search-overlay').classList.contains('hidden')) closeSearchOverlay();
+  if (!$('#notif-overlay').classList.contains('hidden')) closeNotifOverlay();
+  if (!$('#calendar-overlay').classList.contains('hidden')) closeCalendarOverlay();
+  if (!$('#ai-overlay').classList.contains('hidden')) closeAssistant();
+  if ($('#txn-sheet').classList.contains('open')) closeTxnSheet();
+  if ($('#modal').classList.contains('open')) closeModal();
 }
 
 // ===========================================================
 // GLOBAL UI WIRING (topbar, drawer, nav, sheets)
 // ===========================================================
 function wireGlobalUI() {
-  $('#btn-menu').onclick = () => { $('#drawer').classList.add('open'); $('#drawer-overlay').classList.remove('hidden'); setTimeout(() => $('#drawer-overlay').classList.add('show'), 10); };
+  $('#btn-menu').onclick = () => { $('#drawer').classList.add('open'); $('#drawer-overlay').classList.remove('hidden'); setTimeout(() => $('#drawer-overlay').classList.add('show'), 10); pushBackGuard(); };
   $('#drawer-overlay').onclick = closeDrawer;
   $all('.drawer-item[data-nav]').forEach(b => b.onclick = () => { closeDrawer(); goNav(b.dataset.nav); });
   $all('.drawer-item[data-drawer]').forEach(b => b.onclick = () => { closeDrawer(); openDrawerPage(b.dataset.drawer); });
@@ -433,14 +466,14 @@ function wireGlobalUI() {
   $('#btn-add-fab').onclick = () => openTxnSheet({});
 
   $('#btn-search').onclick = openSearch;
-  $('#btn-search-close').onclick = () => $('#search-overlay').classList.add('hidden');
+  $('#btn-search-close').onclick = closeSearchOverlay;
   $('#search-input').oninput = () => renderSearchResults($('#search-input').value.trim().toLowerCase());
 
   $('#btn-notifications').onclick = openNotifications;
-  $('#btn-notif-close').onclick = () => $('#notif-overlay').classList.add('hidden');
+  $('#btn-notif-close').onclick = closeNotifOverlay;
 
   $('#btn-calendar').onclick = openCalendarOverlay;
-  $('#btn-calendar-close').onclick = () => $('#calendar-overlay').classList.add('hidden');
+  $('#btn-calendar-close').onclick = closeCalendarOverlay;
 
   $('#btn-settings-quick').onclick = () => goNav('more');
 
@@ -466,6 +499,7 @@ function closeDrawer() {
   $('#drawer').classList.remove('open');
   $('#drawer-overlay').classList.remove('show');
   setTimeout(() => $('#drawer-overlay').classList.add('hidden'), 250);
+  consumeBackGuard();
 }
 
 function renderDrawerHead() {
@@ -477,6 +511,10 @@ function renderDrawerHead() {
 }
 
 function goNav(name) {
+  // Switching bottom-nav tabs abandons any open subpage stack outright —
+  // without this, a stale renderFn from a different tab could resurface
+  // via the on-screen Back button later (the "wrong page" bug).
+  if (S.subpageStack.length) { S.subpageStack = []; consumeBackGuard(); }
   S.nav = name;
   $all('.view').forEach(v => v.classList.add('hidden'));
   $all('.nav-btn').forEach(b => b.classList.toggle('active', b.dataset.nav === name));
@@ -492,6 +530,7 @@ function goNav(name) {
 // SUBPAGE NAVIGATION (category detail, account detail, editors)
 // ===========================================================
 function openSubpage(title, renderFn) {
+  if (S.subpageStack.length === 0) pushBackGuard(); // one guard per subpage *session*, not per level
   S.subpageStack.push(renderFn);
   $all('.view').forEach(v => v.classList.add('hidden'));
   $('#view-subpage').classList.remove('hidden');
@@ -509,6 +548,7 @@ function subpageBack() {
     prev($('#subpage-inner'));
   } else {
     goNav(S.nav === 'home' ? 'home' : S.nav);
+    consumeBackGuard(); // leaving subpage mode entirely: consume the one guard we pushed on entry
   }
 }
 
@@ -532,6 +572,7 @@ function currentRange() { return M.rangeForPeriod(S.period, S.customRange); }
 
 function openCalendarOverlay() {
   $('#calendar-overlay').classList.remove('hidden');
+  pushBackGuard();
   $('#calendar-body').innerHTML = `
     <p class="muted">Pick a custom date range for the dashboard.</p>
     <label class="field-label">From</label>
@@ -545,13 +586,14 @@ function openCalendarOverlay() {
   $('#cal-apply').onclick = () => {
     S.customRange = { from: $('#cal-from').value, to: $('#cal-to').value };
     S.period = 'custom';
-    $('#calendar-overlay').classList.add('hidden');
+    closeCalendarOverlay();
     renderHome();
   };
   $all('.chip', $('#calendar-body')).forEach(c => c.onclick = () => {
-    S.period = c.dataset.p; $('#calendar-overlay').classList.add('hidden'); renderHome();
+    S.period = c.dataset.p; closeCalendarOverlay(); renderHome();
   });
 }
+function closeCalendarOverlay() { $('#calendar-overlay').classList.add('hidden'); consumeBackGuard(); }
 
 // ===========================================================
 // HOME VIEW
@@ -686,6 +728,7 @@ function openTxnSheet(opts) {
 
   $('#txn-sheet-overlay').classList.remove('hidden');
   setTimeout(() => { $('#txn-sheet-overlay').classList.add('show'); $('#txn-sheet').classList.add('open'); }, 10);
+  pushBackGuard();
 
   const cats = data.categories.filter(c => !c.archived);
   const accts = data.accounts.filter(a => !a.archived);
@@ -831,6 +874,7 @@ function closeTxnSheet() {
   $('#txn-sheet').classList.remove('open');
   $('#txn-sheet-overlay').classList.remove('show');
   setTimeout(() => $('#txn-sheet-overlay').classList.add('hidden'), 300);
+  consumeBackGuard();
 }
 
 function refreshCurrentView() {
@@ -841,31 +885,116 @@ function refreshCurrentView() {
 // ===========================================================
 // CATEGORY DETAIL
 // ===========================================================
+// ===========================================================
+// REUSABLE: time filter + sort + grouped list, usable inside any
+// category/account view — not just the Dashboard. Each caller gets
+// its own independent state (closure), so switching time period in
+// one category never affects another, or the Dashboard.
+// ===========================================================
+const SORT_OPTIONS = [
+  { id: 'newest', label: 'Newest → Oldest' },
+  { id: 'oldest', label: 'Oldest → Newest' },
+  { id: 'high', label: 'Highest Amount' },
+  { id: 'low', label: 'Lowest Amount' },
+];
+function sortTxns(list, sortId) {
+  const arr = list.slice();
+  if (sortId === 'oldest') arr.sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time));
+  else if (sortId === 'high') arr.sort((a, b) => b.amount - a.amount);
+  else if (sortId === 'low') arr.sort((a, b) => a.amount - b.amount);
+  else arr.sort((a, b) => (b.date + b.time).localeCompare(a.date + a.time)); // newest first, default
+  return arr;
+}
+function groupByDateLabel(list) {
+  const groups = {};
+  const order = [];
+  list.forEach(t => {
+    const key = groupLabel(t.date);
+    if (!groups[key]) { groups[key] = []; order.push(key); }
+    groups[key].push(t);
+  });
+  return order.map(key => ({ key, items: groups[key] }));
+}
+/**
+ * Mounts a self-contained time-filter + sort + grouped-list widget into `root`.
+ * `getTxns(range)` must return the already category/account/etc-filtered transactions for that range.
+ */
+function mountFilterableTxnList(root, opts) {
+  const state = { period: opts.initialPeriod || 'month', customRange: null, sort: 'newest', method: 'all' };
+  const wrapId = 'ftl-' + Math.random().toString(36).slice(2, 9);
+  root.insertAdjacentHTML('beforeend', `
+    <div class="time-filter-row" id="${wrapId}-time"></div>
+    ${opts.showMethodFilter ? `<div class="filter-chip-row" id="${wrapId}-method"></div>` : ''}
+    <div class="field-row-2" style="align-items:center;margin:10px 0;">
+      <div class="muted" id="${wrapId}-total" style="font-weight:800;font-size:15px;color:var(--text);"></div>
+      <select class="input" id="${wrapId}-sort" style="width:auto;justify-self:end;">${SORT_OPTIONS.map(s => `<option value="${s.id}">${s.label}</option>`).join('')}</select>
+    </div>
+    <div id="${wrapId}-list" class="txn-list"></div>
+  `);
+  function draw() {
+    const range = M.rangeForPeriod(state.period, state.customRange);
+    let list = opts.getTxns(range);
+    if (opts.showMethodFilter && state.method !== 'all') list = list.filter(t => t.paymentMethod === state.method);
+    const total = list.reduce((s, t) => s + (t.type === 'credit' ? t.amount : -t.amount), 0);
+    $('#' + wrapId + '-total', root).textContent = `${list.length} transaction${list.length === 1 ? '' : 's'} · ${fmt(Math.abs(total))}`;
+    const sorted = sortTxns(list, state.sort);
+    const byAmount = state.sort === 'high' || state.sort === 'low';
+    const groups = byAmount ? null : groupByDateLabel(sorted);
+    $('#' + wrapId + '-list', root).innerHTML = !sorted.length
+      ? `<div class="empty-hint">No transactions in this period.</div>`
+      : byAmount
+        ? sorted.map(txnRowHtml).join('')
+        : groups.map(g => `<div class="sep-title">${g.key}</div>` + g.items.map(txnRowHtml).join('')).join('');
+    $all('.txn-row', $('#' + wrapId + '-list', root)).forEach(r => r.onclick = () => openTransactionDetail(r.dataset.id));
+  }
+  $('#' + wrapId + '-time', root).innerHTML = PERIODS.map(p => `<button class="chip ${state.period === p.id ? 'active' : ''}" data-p="${p.id}">${p.label}</button>`).join('');
+  $all('.chip', $('#' + wrapId + '-time', root)).forEach(c => c.onclick = () => {
+    if (c.dataset.p === 'custom') { openLocalDateRangePicker((from, to) => { state.period = 'custom'; state.customRange = { from, to }; refreshTimeChips(); draw(); }); return; }
+    state.period = c.dataset.p; state.customRange = null; refreshTimeChips(); draw();
+  });
+  function refreshTimeChips() {
+    $all('.chip', $('#' + wrapId + '-time', root)).forEach(c => c.classList.toggle('active', c.dataset.p === state.period));
+  }
+  if (opts.showMethodFilter) {
+    $('#' + wrapId + '-method', root).innerHTML = ['all', ...M.PAYMENT_METHODS].map(m => `<button class="chip ${m === 'all' ? 'active' : ''}" data-m="${m}">${m === 'all' ? 'All Methods' : m}</button>`).join('');
+    $all('.chip', $('#' + wrapId + '-method', root)).forEach(c => c.onclick = () => {
+      state.method = c.dataset.m;
+      $all('.chip', $('#' + wrapId + '-method', root)).forEach(x => x.classList.toggle('active', x === c));
+      draw();
+    });
+  }
+  $('#' + wrapId + '-sort', root).onchange = (e) => { state.sort = e.target.value; draw(); };
+  draw();
+}
+function openLocalDateRangePicker(onApply) {
+  openModal(`
+    <h3>Custom Date Range</h3>
+    <label class="field-label">From</label>
+    <input type="date" class="input" id="ldp-from" value="${M.todayStr()}">
+    <label class="field-label">To</label>
+    <input type="date" class="input" id="ldp-to" value="${M.todayStr()}">
+    <div class="modal-actions"><button class="btn btn-ghost" id="ldp-cancel">Cancel</button><button class="btn btn-primary" id="ldp-apply">Apply</button></div>`);
+  $('#ldp-cancel').onclick = closeModal;
+  $('#ldp-apply').onclick = () => { const from = $('#ldp-from').value, to = $('#ldp-to').value; closeModal(); onApply(from, to); };
+}
+
 function openCategoryDetail(categoryId) {
   const data = D();
   const cat = data.categories.find(c => c.id === categoryId);
   openSubpage(cat.name, (root) => {
-    const range = currentRange();
-    const txns = M.txnsInRange(data.transactions, range).filter(t => t.categoryId === categoryId).sort((a,b)=> (b.date+b.time).localeCompare(a.date+a.time));
-    const total = M.categoryTotal(categoryId, data.transactions, range);
     root.innerHTML = `
       <div class="detail-header" style="background:${swatchColor(cat.color)}">
         <div class="dh-ico">${cat.icon}</div>
         <div class="dh-name">${cat.name}</div>
-        <div class="dh-amt">${fmt(total)}</div>
-      </div>
-      <div class="filter-chip-row">
-        <button class="chip active" data-m="all">All</button>
-        ${M.PAYMENT_METHODS.map(m => `<button class="chip" data-m="${m}">${m}</button>`).join('')}
-      </div>
-      <div id="cat-detail-list" class="txn-list"></div>`;
-    function draw(method) {
-      const list = method === 'all' ? txns : txns.filter(t => t.paymentMethod === method);
-      $('#cat-detail-list', root).innerHTML = list.length ? list.map(txnRowHtml).join('') : `<div class="empty-hint">No transactions in this period.</div>`;
-      $all('.txn-row', $('#cat-detail-list', root)).forEach(r => r.onclick = () => openTransactionDetail(r.dataset.id));
-    }
-    draw('all');
-    $all('.chip', root).forEach(c => c.onclick = () => { $all('.chip', root).forEach(x=>x.classList.remove('active')); c.classList.add('active'); draw(c.dataset.m); });
+        <div class="dh-amt" id="cd-header-total"></div>
+      </div>`;
+    mountFilterableTxnList(root, {
+      initialPeriod: S.period,
+      showMethodFilter: true,
+      getTxns: (range) => M.txnsInRange(D().transactions, range).filter(t => t.categoryId === categoryId),
+    });
+    // keep the header amount in sync with the all-time total (independent of the list's own period filter)
+    $('#cd-header-total', root).textContent = fmt(M.categoryTotal(categoryId, data.transactions, null));
   });
 }
 
@@ -929,6 +1058,10 @@ const TXN_FILTERS = [
 function renderTransactionsView() {
   $('#txn-filter-row').innerHTML = TXN_FILTERS.map(f => `<button class="chip ${S.txnFilter.kind===f.id?'active':''}" data-f="${f.id}">${f.label}</button>`).join('');
   $all('.chip', $('#txn-filter-row')).forEach(c => c.onclick = () => { S.txnFilter.kind = c.dataset.f; renderTransactionsView(); });
+  if (!$('#txn-sort-row')) {
+    $('#txn-filter-row').insertAdjacentHTML('afterend', `<div id="txn-sort-row" style="display:flex;justify-content:flex-end;margin-bottom:4px;"><select class="input" id="txn-sort-select" style="width:auto;">${SORT_OPTIONS.map(s=>`<option value="${s.id}" ${S.txnFilter.sort===s.id?'selected':''}>${s.label}</option>`).join('')}</select></div>`);
+    $('#txn-sort-select').onchange = (e) => { S.txnFilter.sort = e.target.value; drawTxnList(); };
+  }
   drawTxnList();
 }
 function matchesFilter(t, kind) {
@@ -941,12 +1074,15 @@ function matchesFilter(t, kind) {
 }
 function drawTxnList() {
   const data = D();
-  const list = data.transactions.filter(t => matchesFilter(t, S.txnFilter.kind)).sort((a,b)=> (b.date+b.time).localeCompare(a.date+a.time));
-  if (!list.length) { $('#txn-list').innerHTML = `<div class="empty-hint">No transactions yet. Tap + to add one.</div>`; return; }
-  const groups = {};
-  list.forEach(t => { const key = groupLabel(t.date); (groups[key] = groups[key] || []).push(t); });
-  $('#txn-list').innerHTML = Object.entries(groups).map(([label, items]) =>
-    `<div class="txn-group-label">${label}</div>` + items.map(txnRowHtml).join('')).join('');
+  const filtered = data.transactions.filter(t => matchesFilter(t, S.txnFilter.kind));
+  if (!filtered.length) { $('#txn-list').innerHTML = `<div class="empty-hint">No transactions yet. Tap + to add one.</div>`; return; }
+  const sortId = S.txnFilter.sort || 'newest';
+  const list = sortTxns(filtered, sortId);
+  // Date-period grouping only makes sense for date-ordered sorts; an amount sort shows a flat list.
+  const byAmount = sortId === 'high' || sortId === 'low';
+  $('#txn-list').innerHTML = byAmount
+    ? list.map(txnRowHtml).join('')
+    : groupByDateLabel(list).map(g => `<div class="sep-title">${g.key}</div>` + g.items.map(txnRowHtml).join('')).join('');
   $all('.txn-row', $('#txn-list')).forEach(r => r.onclick = () => openTransactionDetail(r.dataset.id));
 }
 function groupLabel(dateStr) {
@@ -962,9 +1098,11 @@ function groupLabel(dateStr) {
 // ===========================================================
 function openSearch() {
   $('#search-overlay').classList.remove('hidden');
+  pushBackGuard();
   $('#search-input').value = ''; $('#search-results').innerHTML = '';
   setTimeout(() => $('#search-input').focus(), 50);
 }
+function closeSearchOverlay() { $('#search-overlay').classList.add('hidden'); consumeBackGuard(); }
 function renderSearchResults(q) {
   if (!q) { $('#search-results').innerHTML = ''; return; }
   const data = D();
@@ -974,7 +1112,7 @@ function renderSearchResults(q) {
     return hay.includes(q);
   }).sort((a,b)=> (b.date+b.time).localeCompare(a.date+a.time));
   $('#search-results').innerHTML = results.length ? results.map(txnRowHtml).join('') : `<div class="empty-hint">No matches for "${q}".</div>`;
-  $all('.txn-row', $('#search-results')).forEach(r => r.onclick = () => { $('#search-overlay').classList.add('hidden'); openTransactionDetail(r.dataset.id); });
+  $all('.txn-row', $('#search-results')).forEach(r => r.onclick = () => { closeSearchOverlay(); openTransactionDetail(r.dataset.id); });
 }
 
 // ===========================================================
@@ -1003,8 +1141,10 @@ function buildNotifications() {
 function openNotifications() {
   const notes = buildNotifications();
   $('#notif-overlay').classList.remove('hidden');
+  pushBackGuard();
   $('#notif-list').innerHTML = notes.length ? notes.map(n => `<div class="notif-item"><b>${n.icon} ${n.title}</b>${n.sub}</div>`).join('') : `<div class="empty-hint">You're all caught up.</div>`;
 }
+function closeNotifOverlay() { $('#notif-overlay').classList.add('hidden'); consumeBackGuard(); }
 function refreshNotifDot() {
   $('#notif-dot').classList.toggle('hidden', buildNotifications().length === 0);
 }
@@ -1763,7 +1903,7 @@ function openAccountDetail(accId) {
   const data = D();
   const acc = data.accounts.find(a => a.id === accId);
   openSubpage(acc.name, (root) => {
-    const txns = data.transactions.filter(t => t.accountId === accId).sort((a,b)=>(b.date+b.time).localeCompare(a.date+a.time));
+    const txns = data.transactions.filter(t => t.accountId === accId);
     const bal = M.accountBalance(acc, data.transactions);
     const credits = M.sumCredit(txns), debits = M.sumDebit(txns);
     root.innerHTML = `
@@ -1779,10 +1919,12 @@ function openAccountDetail(accId) {
       <div class="modal-actions">
         <button class="btn btn-ghost btn-block" id="acd-edit">Edit Account</button>
         <button class="btn btn-danger btn-block" id="acd-delete">Delete Account</button>
-      </div>
-      <div class="section-head"><h2>Transactions</h2></div>
-      <div id="acd-list" class="txn-list">${txns.length?txns.map(txnRowHtml).join(''):'<div class="empty-hint">No transactions yet.</div>'}</div>`;
-    $all('.txn-row', root).forEach(r => r.onclick = () => openTransactionDetail(r.dataset.id));
+      </div>`;
+    mountFilterableTxnList(root, {
+      initialPeriod: 'all',
+      showMethodFilter: false,
+      getTxns: (range) => M.txnsInRange(D().transactions, range).filter(t => t.accountId === accId),
+    });
     $('#acd-edit', root).onclick = () => openAccountEditor(acc.id, () => openAccountDetail(acc.id));
     $('#acd-delete', root).onclick = () => confirmDialog(
       'Delete this account?',
@@ -1885,10 +2027,12 @@ function openBackupRestore() {
 // ===========================================================
 function openAssistant() {
   $('#ai-overlay').classList.remove('hidden');
+  pushBackGuard();
   setTimeout(() => $('#ai-input').focus(), 100);
 }
 function closeAssistant() {
   $('#ai-overlay').classList.add('hidden');
+  consumeBackGuard();
 }
 function appendAiMessage(text, cls) {
   const el = document.createElement('div');
