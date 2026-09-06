@@ -1734,27 +1734,78 @@ function openCategorySharing(householdId, householdName) {
     root.innerHTML = `<div class="empty-hint">Loading…</div>`;
     const { data: cats, error } = await Supa.client.from('categories').select('*').eq('household_id', householdId).eq('archived', false).order('type').order('sort_order');
     if (error) { root.innerHTML = `<div class="empty-hint">${error.message}</div>`; return; }
-    const groups = { income: 'Income', expense: 'Expense', financial: 'Money Borrowed / Lent / Other' };
+
+    function renderQuickToggles() {
+      return CATEGORY_TYPE_SECTIONS.map(section => {
+        const list = cats.filter(c => c.type === section.type);
+        if (!list.length) return '';
+        const allOn = list.every(c => c.shared !== false);
+        return `
+        <div class="share-row share-row-master" data-master="${section.type}">
+          <div class="sr-name"><strong>${section.label}</strong> <span class="muted">(${list.length})</span></div>
+          <label class="toggle-switch"><input type="checkbox" data-master-toggle="${section.type}" ${allOn ? 'checked' : ''}><span class="toggle-slider"></span></label>
+        </div>`;
+      }).join('');
+    }
+    function renderSections() {
+      return CATEGORY_TYPE_SECTIONS.map(section => {
+        const list = cats.filter(c => c.type === section.type);
+        if (!list.length) return '';
+        return `
+        <div class="sep-title">${section.label}</div>
+        <div>${list.map(c => `
+          <div class="share-row">
+            <div class="sr-ico ${c.color}">${c.icon}</div>
+            <div class="sr-name">${c.name}</div>
+            <label class="toggle-switch"><input type="checkbox" data-cat="${c.id}" ${c.shared !== false ? 'checked' : ''}><span class="toggle-slider"></span></label>
+          </div>`).join('')}</div>`;
+      }).join('') || `<div class="empty-hint">No categories yet.</div>`;
+    }
+
     root.innerHTML = `
       <p class="muted">Choose which categories members of "${householdName}" can see and use. Turning a category off only hides it from members — it stays visible to you, and no past transactions are deleted.</p>
-      ${Object.keys(groups).map(type => `
-        <div class="sep-title">${groups[type]}</div>
-        <div id="share-${type}"></div>
-      `).join('')}
+      <div class="sep-title">Quick Toggle by Type</div>
+      <div id="share-quick">${renderQuickToggles()}</div>
+      <div id="share-sections">${renderSections()}</div>
     `;
-    Object.keys(groups).forEach(type => {
-      const list = cats.filter(c => c.type === type);
-      $('#share-' + type, root).innerHTML = list.map(c => `
-        <div class="share-row">
-          <div class="sr-ico ${c.color}">${c.icon}</div>
-          <div class="sr-name">${c.name}</div>
-          <label class="toggle-switch"><input type="checkbox" data-cat="${c.id}" ${c.shared ? 'checked' : ''}><span class="toggle-slider"></span></label>
-        </div>`).join('') || `<div class="empty-hint">No categories yet.</div>`;
-    });
-    $all('input[data-cat]', root).forEach(input => input.onchange = async () => {
-      try { await Supa.setCategoryShared(input.dataset.cat, input.checked); toast(input.checked ? 'Shared with members' : 'Hidden from members'); }
-      catch (e) { input.checked = !input.checked; toast(e.message); }
-    });
+
+    function wireIndividual() {
+      $all('input[data-cat]', root).forEach(input => input.onchange = async () => {
+        try {
+          const row = await Supa.setCategoryShared(input.dataset.cat, input.checked);
+          const cat = cats.find(c => c.id === input.dataset.cat);
+          if (cat) cat.shared = row.shared;
+          toast(input.checked ? 'Shared with members' : 'Hidden from members');
+          $('#share-quick', root).innerHTML = renderQuickToggles();
+          wireQuick();
+        } catch (e) { input.checked = !input.checked; toast(e.message); }
+      });
+    }
+    function wireQuick() {
+      $all('input[data-master-toggle]', root).forEach(input => input.onchange = async () => {
+        const type = input.dataset.masterToggle;
+        const targetShared = input.checked;
+        const list = cats.filter(c => c.type === type);
+        input.disabled = true;
+        try {
+          await Promise.all(list.map(async c => {
+            const row = await Supa.setCategoryShared(c.id, targetShared);
+            c.shared = row.shared;
+          }));
+          toast(`${targetShared ? 'Shared' : 'Hidden'} all ${CATEGORY_TYPE_SECTIONS.find(s => s.type === type).label} categories`);
+          $('#share-sections', root).innerHTML = renderSections();
+          wireIndividual();
+        } catch (e) {
+          toast(e.message);
+          $('#share-quick', root).innerHTML = renderQuickToggles();
+          wireQuick();
+        } finally {
+          input.disabled = false;
+        }
+      });
+    }
+    wireIndividual();
+    wireQuick();
   });
 }
 

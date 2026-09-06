@@ -447,6 +447,8 @@ input,select,textarea{ font-family:inherit; }
 .share-row{ display:flex; align-items:center; gap:12px; background:var(--surface); border-radius:14px; padding:12px 14px; margin-bottom:8px; box-shadow:var(--shadow-sm); }
 .share-row .sr-ico{ width:32px; height:32px; border-radius:9px; display:flex; align-items:center; justify-content:center; font-size:15px; flex:0 0 auto; }
 .share-row .sr-name{ flex:1; font-weight:600; font-size:14px; }
+.share-row-master{ background:var(--primary-soft, rgba(99,102,241,.1)); border:1px solid var(--primary); }
+.share-row-master .sr-name{ font-weight:700; }
 .toggle-switch{ position:relative; display:inline-block; width:42px; height:24px; flex:0 0 auto; }
 .toggle-switch input{ opacity:0; width:0; height:0; }
 .toggle-slider{ position:absolute; cursor:pointer; inset:0; background:var(--border); border-radius:999px; transition:.15s; }

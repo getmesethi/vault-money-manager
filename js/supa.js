@@ -56,7 +56,19 @@ const Supa = (() => {
 
   // ---------------- Household ----------------
   async function myMemberships() {
-    const { data, error } = await client.from('household_members').select('household_id, role, households(id, name, join_code, owner_id)');
+    // IMPORTANT: household_members' RLS policy (is_household_member) lets any
+    // member of a household read ALL membership rows for that household, not
+    // just their own — that's needed elsewhere for rendering the Members
+    // list. Without filtering by our own user id here, that means an owner
+    // with 1 other member would get back 2 rows for the SAME household (their
+    // own 'owner' row + the other member's 'member' row), rendering as a
+    // duplicate household card. So always scope this to our own rows.
+    const { data: { user }, error: userErr } = await client.auth.getUser();
+    if (userErr) throw userErr;
+    if (!user) return [];
+    const { data, error } = await client.from('household_members')
+      .select('household_id, role, households(id, name, join_code, owner_id)')
+      .eq('user_id', user.id);
     if (error) throw error;
     return data;
   }
