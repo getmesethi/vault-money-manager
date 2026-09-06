@@ -1539,6 +1539,26 @@ function openHouseholdsList() {
   });
 }
 
+function openRenameHousehold(h, onDone) {
+  openModal(`
+    <h3>Rename Household</h3>
+    <label class="field-label">Household Name</label>
+    <input class="input" id="rh-name" value="${h.name}" maxlength="60">
+    <p class="error-text hidden" id="rh-err"></p>
+    <div class="modal-actions"><button class="btn btn-ghost" id="rh-cancel">Cancel</button><button class="btn btn-primary" id="rh-save">Save</button></div>`);
+  $('#rh-cancel').onclick = closeModal;
+  $('#rh-save').onclick = async () => {
+    const name = $('#rh-name').value.trim();
+    if (!name) { $('#rh-err').textContent = 'Enter a household name.'; $('#rh-err').classList.remove('hidden'); return; }
+    try {
+      await Store.renameHouseholdFlow(h.id, name);
+      closeModal(); toast('Household renamed.');
+      renderDrawerHead();
+      if (onDone) onDone();
+    } catch (e) { $('#rh-err').textContent = e.message; $('#rh-err').classList.remove('hidden'); }
+  };
+}
+
 function openCreateAnotherHousehold() {
   openModal(`
     <h3>Create New Household</h3>
@@ -1604,6 +1624,7 @@ function openHouseholdDetail(householdId) {
       </div>
       <p class="muted">Share the join code above so someone else can join this exact household.</p>
 
+      ${h.role === 'owner' ? `<button class="btn btn-ghost btn-block" id="hd-rename" style="margin-top:10px;">✏️ Rename Household</button>` : ''}
       ${h.role === 'owner' ? `<button class="btn btn-ghost btn-block" id="hd-sharing" style="margin-top:10px;">🗂️ Category Sharing</button>` : ''}
 
       <div class="sep-title">Members</div>
@@ -1622,6 +1643,7 @@ function openHouseholdDetail(householdId) {
       goNav('home'); refreshCurrentView();
     };
     $('#hd-sharing', root) && ($('#hd-sharing', root).onclick = () => openCategorySharing(h.id, h.name));
+    $('#hd-rename', root) && ($('#hd-rename', root).onclick = () => openRenameHousehold(h, () => openHouseholdDetail(h.id)));
     $all('[data-make-owner]', root).forEach(b => b.onclick = () => confirmDialog(
       'Transfer Ownership?',
       `Are you sure you want to make ${nameFor(b.dataset.makeOwner)} the owner of "${h.name}"? You will become a regular member. This action cannot be undone by you alone.`,

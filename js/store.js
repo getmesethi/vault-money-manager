@@ -88,6 +88,10 @@ const Store = (() => {
     return h;
   }
 
+  async function renameHouseholdFlow(householdId, name) {
+    await Supa.renameHousehold(householdId, name);
+    if (_household && _household.id === householdId) _household.name = name;
+  }
   async function leaveHouseholdFlow(householdId) { await Supa.leaveHousehold(householdId); }
   async function transferOwnershipFlow(householdId, newOwnerId) { await Supa.transferOwnership(householdId, newOwnerId); }
   async function deleteHouseholdFlow(householdId) { await Supa.deleteHousehold(householdId); }
@@ -320,7 +324,7 @@ const Store = (() => {
     getPrefs, setPrefs,
     refreshSession, session, currentUser, onAuthStateChange, signUpEmail, signInEmail, signInGoogle, resetPassword, signOut,
     household, loadHousehold, createHouseholdFlow, joinHouseholdFlow, getMembers, getProfiles, updateOwnProfile,
-    listMyHouseholds, switchHousehold, leaveHouseholdFlow, transferOwnershipFlow, deleteHouseholdFlow,
+    listMyHouseholds, switchHousehold, renameHouseholdFlow, leaveHouseholdFlow, transferOwnershipFlow, deleteHouseholdFlow,
     setCategoryShared, deleteMyAccountForever,
     data, loadAllData, refreshTable, startRealtime, stopRealtime,
     addTransaction, updateTransaction, deleteTransaction,

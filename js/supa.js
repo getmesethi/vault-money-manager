@@ -75,6 +75,10 @@ const Supa = (() => {
     if (error) throw error;
     return data;
   }
+  async function renameHousehold(householdId, name) {
+    const { error } = await client.from('households').update({ name }).eq('id', householdId);
+    if (error) throw error;
+  }
   async function leaveHousehold(householdId) {
     const { error } = await client.rpc('leave_household', { p_household_id: householdId });
     if (error) throw error;
@@ -174,7 +178,7 @@ const Supa = (() => {
   return {
     client, getSession, onAuthStateChange, signUpEmail, signInEmail, signInGoogle, resetPassword, signOut,
     myMemberships, createHousehold, joinHousehold, getMembers, getProfiles, updateOwnProfile,
-    leaveHousehold, transferOwnership, deleteHousehold, setCategoryShared, deleteUserAccount,
+    renameHousehold, leaveHousehold, transferOwnership, deleteHousehold, setCategoryShared, deleteUserAccount,
     listAll, insertRow, updateRow, deleteRow, upsertRows,
     subscribeHousehold, unsubscribe, askAssistant
   };
