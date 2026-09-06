@@ -122,6 +122,14 @@ const Supa = (() => {
     if (error) throw error;
     return data;
   }
+  // Owner-only: restrict (or restore) a specific member's ability to add or
+  // delete transactions in this household. The owner themself can never be
+  // restricted (enforced server-side, not just here).
+  async function setMemberPermissions(householdId, userId, canAdd, canDelete) {
+    const { data, error } = await client.rpc('set_member_permissions', { p_household_id: householdId, p_user_id: userId, p_can_add: canAdd, p_can_delete: canDelete });
+    if (error) throw error;
+    return data;
+  }
   async function deleteUserAccount() {
     const { data: { session } } = await client.auth.getSession();
     if (!session) throw new Error('Not signed in.');
@@ -205,7 +213,7 @@ const Supa = (() => {
     client, getSession, onAuthStateChange, signUpEmail, signInEmail, signInGoogle, resetPassword, signOut,
     myMemberships, createHousehold, joinHousehold, getMembers, getProfiles, updateOwnProfile,
     renameHousehold, leaveHousehold, transferOwnership, deleteHousehold, setCategoryShared, deleteUserAccount,
-    setCategoryMemberShared, getCategoryMemberShares,
+    setCategoryMemberShared, getCategoryMemberShares, setMemberPermissions,
     listAll, insertRow, updateRow, deleteRow, upsertRows,
     subscribeHousehold, unsubscribe, askAssistant
   };

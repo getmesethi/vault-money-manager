@@ -453,6 +453,7 @@ function closeAllOverlays() {
 function wireGlobalUI() {
   $('#btn-menu').onclick = () => { $('#drawer').classList.add('open'); $('#drawer-overlay').classList.remove('hidden'); setTimeout(() => $('#drawer-overlay').classList.add('show'), 10); pushBackGuard(); };
   $('#drawer-overlay').onclick = closeDrawer;
+  $('.drawer-head').onclick = () => { closeDrawer(); goNav('home'); };
   $all('.drawer-item[data-nav]').forEach(b => b.onclick = () => { closeDrawer(); goNav(b.dataset.nav); });
   $all('.drawer-item[data-drawer]').forEach(b => b.onclick = () => { closeDrawer(); openDrawerPage(b.dataset.drawer); });
   $('#btn-lock-now').onclick = () => { closeDrawer(); doLock(); };
@@ -519,7 +520,9 @@ function goNav(name) {
   $all('.view').forEach(v => v.classList.add('hidden'));
   $all('.nav-btn').forEach(b => b.classList.toggle('active', b.dataset.nav === name));
   const titles = { home: 'Dashboard', transactions: 'Transactions', analytics: 'Analytics', more: 'More' };
-  $('#topbar-title').textContent = titles[name] || 'Vault';
+  const bar = $('#topbar-title');
+  bar.textContent = titles[name] || 'Vault';
+  bar.onclick = null; bar.classList.remove('topbar-title-clickable'); // only renderHomeTopbar() re-arms this, for 'home' only
   if (name === 'home') { $('#view-home').classList.remove('hidden'); renderHome(); }
   else if (name === 'transactions') { $('#view-transactions').classList.remove('hidden'); renderTransactionsView(); }
   else if (name === 'analytics') { $('#view-analytics').classList.remove('hidden'); renderAnalyticsTab('charts'); }
@@ -535,6 +538,7 @@ function openSubpage(title, renderFn) {
   $all('.view').forEach(v => v.classList.add('hidden'));
   $('#view-subpage').classList.remove('hidden');
   $('#topbar-title').textContent = title;
+  $('#topbar-title').onclick = null; $('#topbar-title').classList.remove('topbar-title-clickable'); // don't inherit Dashboard's household-switcher tap target
   $('#subpage-content').innerHTML = `<div class="subpage-back" id="subpage-back-btn">← Back</div><div id="subpage-inner"></div>`;
   $('#subpage-back-btn').onclick = subpageBack;
   renderFn($('#subpage-inner'));
@@ -599,10 +603,33 @@ function closeCalendarOverlay() { $('#calendar-overlay').classList.add('hidden')
 // HOME VIEW
 // ===========================================================
 function renderHome() {
+  renderHomeTopbar();
   renderTimeFilterRow();
   renderSummaryScroller();
   renderCategoryGrid();
   renderHomeCharts();
+}
+
+// Lets you jump to another household's dashboard (including ones where
+// you're just a member, seeing whatever that owner has shared with you)
+// right from the Dashboard itself — only shown when you actually belong to
+// more than one, so a single-household user sees the plain "Dashboard" title.
+async function renderHomeTopbar() {
+  const bar = $('#topbar-title');
+  try {
+    const list = await Store.listMyHouseholds();
+    if (S.nav !== 'home') return; // user already navigated away while this was loading
+    const h = Store.household();
+    if (list.length > 1 && h) {
+      bar.innerHTML = `Dashboard <span class="topbar-house-switch">· ${h.name} ▾</span>`;
+      bar.onclick = () => openHouseholdsList();
+      bar.classList.add('topbar-title-clickable');
+    } else {
+      bar.textContent = 'Dashboard';
+      bar.onclick = null;
+      bar.classList.remove('topbar-title-clickable');
+    }
+  } catch (e) { /* leave the plain "Dashboard" title on any failure */ }
 }
 
 function renderSummaryScroller() {
@@ -1700,7 +1727,7 @@ function openHouseholdDetail(householdId) {
           <span class="kv-v">${m.role}${canManage ? ` · <button class="link-btn" data-make-owner="${m.user_id}">Make Owner</button>` : ''}${canManage ? ' <span class="kv-chev">›</span>' : ''}</span>
         </div>`;
       }).join('')}</div>
-      ${h.role === 'owner' ? `<p class="muted" style="margin-top:-6px;">Tap a member to control which categories they can see.</p>` : ''}
+      ${h.role === 'owner' ? `<p class="muted" style="margin-top:-6px;">Tap a member to control what they can see and do.</p>` : ''}
 
       <div class="modal-actions">
         ${h.role === 'owner'
@@ -1720,7 +1747,8 @@ function openHouseholdDetail(householdId) {
     $('#hd-add-another', root).onclick = () => openHouseholdsList();
     $all('[data-member]', root).forEach(row => row.onclick = (e) => {
       if (e.target.closest('[data-make-owner]')) return; // let Make Owner handle its own click
-      openMemberCategorySharing(h.id, h.name, row.dataset.member, row.dataset.memberName);
+      const m = members.find(x => x.user_id === row.dataset.member);
+      openMemberCategorySharing(h.id, h.name, row.dataset.member, row.dataset.memberName, m);
     });
     $all('[data-make-owner]', root).forEach(b => b.onclick = () => confirmDialog(
       'Transfer Ownership?',
@@ -1840,11 +1868,24 @@ function openCategorySharing(householdId, householdName) {
 // category the owner turned OFF for the whole household stays off for
 // EVERY member no matter what's set here (data layer enforces this via
 // category_member_shares + the categories RLS policy, not just the UI).
-function openMemberCategorySharing(householdId, householdName, memberUserId, memberName) {
-  openSubpage(`${memberName}'s Categories`, async (root) => {
+function openMemberCategorySharing(householdId, householdName, memberUserId, memberName, memberRow) {
+  openSubpage(`${memberName}'s Access`, async (root) => {
     root.innerHTML = `<div class="empty-hint">Loading…</div>`;
     const { data: cats, error } = await Supa.client.from('categories').select('*').eq('household_id', householdId).eq('archived', false).order('type').order('sort_order');
     if (error) { root.innerHTML = `<div class="empty-hint">${error.message}</div>`; return; }
+    let canAdd = memberRow ? memberRow.can_add !== false : true;
+    let canDelete = memberRow ? memberRow.can_delete !== false : true;
+    function renderPermissions() {
+      return `
+        <div class="share-row">
+          <div class="sr-name"><strong>Can Add Transactions</strong></div>
+          <label class="toggle-switch"><input type="checkbox" id="perm-can-add" ${canAdd ? 'checked' : ''}><span class="toggle-slider"></span></label>
+        </div>
+        <div class="share-row">
+          <div class="sr-name"><strong>Can Delete Transactions</strong></div>
+          <label class="toggle-switch"><input type="checkbox" id="perm-can-delete" ${canDelete ? 'checked' : ''}><span class="toggle-slider"></span></label>
+        </div>`;
+    }
     const overrides = await Store.getCategoryMemberShares(cats.map(c => c.id));
     const overrideFor = (catId) => overrides.find(o => o.category_id === catId && o.user_id === memberUserId);
     function isVisible(c) {
@@ -1885,11 +1926,36 @@ function openMemberCategorySharing(householdId, householdName, memberUserId, mem
     }
 
     root.innerHTML = `
-      <p class="muted">Choose which categories <strong>${memberName}</strong> can see and use in "${householdName}" — independent of any other member. A category that's off for the whole household (via Category Sharing) stays off for everyone regardless of what's set here.</p>
+      <p class="muted">Control what <strong>${memberName}</strong> can see and do in "${householdName}" — independent of any other member.</p>
+      <div class="sep-title">Permissions</div>
+      <div id="perm-section">${renderPermissions()}</div>
+      <div class="sep-title">Categories</div>
+      <p class="muted">A category that's off for the whole household (via Category Sharing) stays off for everyone regardless of what's set here.</p>
       <div class="sep-title">Quick Toggle by Type</div>
       <div id="share-quick">${renderQuickToggles()}</div>
       <div id="share-sections">${renderSections()}</div>
     `;
+
+    function wirePermissions() {
+      const addInput = $('#perm-can-add', root), delInput = $('#perm-can-delete', root);
+      const onChange = async () => {
+        const nextAdd = addInput.checked, nextDelete = delInput.checked;
+        addInput.disabled = true; delInput.disabled = true;
+        try {
+          await Store.setMemberPermissions(householdId, memberUserId, nextAdd, nextDelete);
+          canAdd = nextAdd; canDelete = nextDelete;
+          toast(`Updated permissions for ${memberName}`);
+        } catch (e) {
+          addInput.checked = canAdd; delInput.checked = canDelete;
+          toast(e.message);
+        } finally {
+          addInput.disabled = false; delInput.disabled = false;
+        }
+      };
+      addInput.onchange = onChange;
+      delInput.onchange = onChange;
+    }
+    wirePermissions();
 
     function wireIndividual() {
       $all('input[data-cat]', root).forEach(input => input.onchange = async () => {
