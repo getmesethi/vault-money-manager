@@ -1285,7 +1285,7 @@ function renderMore() {
     <div class="more-row" data-act="recurring"><span class="mr-ico">🔁</span><span class="mr-label">Recurring Transactions</span><span class="mr-chev">›</span></div>
 
     <div class="more-section-title">Household</div>
-    <div class="more-row" data-act="household"><span class="mr-ico">🏡</span><span class="mr-label">${Store.household() ? Store.household().name : 'Household'}</span><span class="mr-chev">›</span></div>
+    <div class="more-row" data-act="household"><span class="mr-ico">🏡</span><span class="mr-label">My Households</span><span class="mr-val">${Store.household() ? Store.household().name : ''}</span><span class="mr-chev">›</span></div>
 
     <div class="more-section-title">Data</div>
     <div class="more-row" data-act="backup"><span class="mr-ico">💾</span><span class="mr-label">Backup &amp; Restore</span><span class="mr-chev">›</span></div>
@@ -1293,6 +1293,7 @@ function renderMore() {
     <div class="more-section-title">Account</div>
     <div class="more-row" data-act="lock"><span class="mr-ico">🔒</span><span class="mr-label" style="color:var(--red)">Lock Now</span></div>
     <div class="more-row" data-act="signout"><span class="mr-ico">🚪</span><span class="mr-label" style="color:var(--red)">Sign Out</span></div>
+    <div class="more-row" data-act="delete-account"><span class="mr-ico">⚠️</span><span class="mr-label" style="color:var(--red)">Delete Account</span></div>
   `;
   $all('.more-row', $('#more-list')).forEach(r => r.onclick = () => handleMoreAction(r.dataset.act));
 }
@@ -1312,6 +1313,50 @@ function handleMoreAction(act) {
   if (act === 'household') return openDrawerPage('household');
   if (act === 'lock') return doLock();
   if (act === 'signout') return $('#btn-sign-out').click();
+  if (act === 'delete-account') return openDeleteAccountFlow();
+}
+
+// ---------- Delete Account (permanent, two-step confirmation) ----------
+function openDeleteAccountFlow() {
+  const email = Store.currentUser().email;
+  openModal(`
+    <h3>⚠️ Delete Your Account</h3>
+    <p class="muted">This <b>permanently and irreversibly</b> deletes your account (${email}). Here's exactly what happens:</p>
+    <ul class="muted" style="padding-left:18px; line-height:1.7;">
+      <li>You are removed from every household you're a member of.</li>
+      <li>If you <b>own</b> a household that has other members, ownership passes automatically to the longest-standing member — their data is <b>not</b> deleted.</li>
+      <li>If you're the <b>only</b> member of a household you own, that household and everything in it (accounts, categories, transactions, budgets) is deleted permanently.</li>
+      <li>Your login (email/password or Google) is deleted and cannot be recovered.</li>
+    </ul>
+    <p class="error-text" style="text-align:left;">This action cannot be undone.</p>
+    <div class="modal-actions"><button class="btn btn-ghost" id="da-cancel">Cancel</button><button class="btn btn-danger" id="da-next">Continue</button></div>`);
+  $('#da-cancel').onclick = closeModal;
+  $('#da-next').onclick = () => openDeleteAccountConfirmStep();
+}
+function openDeleteAccountConfirmStep() {
+  openModal(`
+    <h3>Final Confirmation</h3>
+    <p class="muted">Type <b>DELETE</b> below to permanently delete your account. There is no way to undo this.</p>
+    <input class="input" id="da-confirm-input" placeholder="Type DELETE" autocomplete="off">
+    <p class="error-text hidden" id="da-err"></p>
+    <div class="modal-actions"><button class="btn btn-ghost" id="da-cancel2">Cancel</button><button class="btn btn-danger" id="da-final">Delete My Account Forever</button></div>`);
+  $('#da-cancel2').onclick = closeModal;
+  $('#da-final').onclick = async () => {
+    if ($('#da-confirm-input').value.trim() !== 'DELETE') {
+      $('#da-err').textContent = 'Type DELETE exactly (all caps) to confirm.'; $('#da-err').classList.remove('hidden'); return;
+    }
+    $('#da-final').disabled = true; $('#da-final').textContent = 'Deleting…';
+    try {
+      await Store.deleteMyAccountForever();
+      closeModal();
+      Store.clearDeviceLock(Store.currentUser().id);
+      await Store.signOut();
+      location.reload();
+    } catch (e) {
+      $('#da-err').textContent = e.message; $('#da-err').classList.remove('hidden');
+      $('#da-final').disabled = false; $('#da-final').textContent = 'Delete My Account Forever';
+    }
+  };
 }
 
 function openDrawerPage(page) {
@@ -1323,11 +1368,84 @@ function openDrawerPage(page) {
 }
 
 // ---------- Household manager ----------
-function openHouseholdManager() {
+// ---------- My Households (multi-household list + switcher) ----------
+function openHouseholdManager() { openHouseholdsList(); }
+
+function openHouseholdsList() {
+  openSubpage('My Households', async (root) => {
+    root.innerHTML = `<div class="empty-hint">Loading…</div>`;
+    const list = await Store.listMyHouseholds();
+    const activeId = Store.household() ? Store.household().id : null;
+    root.innerHTML = `
+      <div class="field-row-2" style="margin-bottom:16px;">
+        <button class="btn btn-primary" id="hl-create">+ Create New</button>
+        <button class="btn btn-ghost" id="hl-join">+ Join Existing</button>
+      </div>
+      <div class="sep-title">Your Households</div>
+      <div id="hl-list"></div>
+    `;
+    $('#hl-list', root).innerHTML = list.map(h => `
+      <div class="household-card ${h.id === activeId ? 'active' : ''}" data-hh="${h.id}">
+        <div class="hc-ico">🏡</div>
+        <div class="hc-mid">
+          <div class="hc-name">${h.name}</div>
+          <div class="hc-sub">${h.role === 'owner' ? 'Owner' : 'Member'}</div>
+        </div>
+        ${h.id === activeId ? '<span class="hc-badge">Active</span>' : ''}
+      </div>`).join('') || `<div class="empty-hint">No households yet.</div>`;
+    $all('.household-card', root).forEach(c => c.onclick = () => openHouseholdDetail(c.dataset.hh));
+    $('#hl-create', root).onclick = () => openCreateAnotherHousehold();
+    $('#hl-join', root).onclick = () => openJoinAnotherHousehold();
+  });
+}
+
+function openCreateAnotherHousehold() {
+  openModal(`
+    <h3>Create New Household</h3>
+    <label class="field-label">Household Name</label>
+    <input class="input" id="ch-name" placeholder="e.g. Weekend Home" maxlength="60">
+    <p class="error-text hidden" id="ch-err"></p>
+    <div class="modal-actions"><button class="btn btn-ghost" id="ch-cancel">Cancel</button><button class="btn btn-primary" id="ch-save">Create</button></div>`);
+  $('#ch-cancel').onclick = closeModal;
+  $('#ch-save').onclick = async () => {
+    const name = $('#ch-name').value.trim();
+    if (!name) { $('#ch-err').textContent = 'Enter a household name.'; $('#ch-err').classList.remove('hidden'); return; }
+    try {
+      await Store.createHouseholdFlow(name, 0, 'bank', true);
+      await Store.switchHousehold(Store.household().id);
+      closeModal(); showSuccess('✓ Household Created\n' + name);
+      openHouseholdsList(); refreshCurrentView();
+    } catch (e) { $('#ch-err').textContent = e.message; $('#ch-err').classList.remove('hidden'); }
+  };
+}
+function openJoinAnotherHousehold() {
+  openModal(`
+    <h3>Join Existing Household</h3>
+    <label class="field-label">Join Code</label>
+    <input class="input" id="jh-code" placeholder="e.g. A1B2C3" maxlength="6" style="text-transform:uppercase;letter-spacing:.1em;font-weight:800;text-align:center;font-size:18px;">
+    <p class="error-text hidden" id="jh-err"></p>
+    <div class="modal-actions"><button class="btn btn-ghost" id="jh-cancel">Cancel</button><button class="btn btn-primary" id="jh-save">Join</button></div>`);
+  $('#jh-cancel').onclick = closeModal;
+  $('#jh-save').onclick = async () => {
+    const code = $('#jh-code').value.trim();
+    if (!code) { $('#jh-err').textContent = 'Enter a join code.'; $('#jh-err').classList.remove('hidden'); return; }
+    try {
+      const h = await Store.joinHouseholdFlow(code);
+      await Store.switchHousehold(h.id);
+      closeModal(); showSuccess('✓ Joined Household\n' + h.name);
+      openHouseholdsList(); refreshCurrentView();
+    } catch (e) { $('#jh-err').textContent = 'Invalid join code.'; $('#jh-err').classList.remove('hidden'); }
+  };
+}
+
+function openHouseholdDetail(householdId) {
   openSubpage('Household', async (root) => {
     root.innerHTML = `<div class="empty-hint">Loading…</div>`;
-    const h = Store.household();
-    const members = await Store.getMembers();
+    const list = await Store.listMyHouseholds();
+    const h = list.find(x => x.id === householdId);
+    if (!h) { root.innerHTML = `<div class="empty-hint">Household not found.</div>`; return; }
+    const isActive = Store.household() && Store.household().id === h.id;
+    const members = await Supa.getMembers(h.id);
     const profiles = await Store.getProfiles(members.map(m => m.user_id));
     const nameFor = (uid) => {
       if (uid === Store.currentUser().id) return 'You';
@@ -1339,14 +1457,90 @@ function openHouseholdManager() {
         <div class="dh-ico">🏡</div>
         <div class="dh-name">${h.name}</div>
       </div>
+      ${isActive ? `<div class="empty-hint" style="padding:8px;">This is your currently active household.</div>` : `<button class="btn btn-primary btn-block" id="hd-switch" style="margin:12px 0;">Switch to This Household</button>`}
       <div class="kv-list">
         <div class="kv-row"><span class="kv-k">Join Code</span><span class="kv-v" style="letter-spacing:.1em;font-size:16px;">${h.joinCode}</span></div>
         <div class="kv-row"><span class="kv-k">Your Role</span><span class="kv-v">${h.role === 'owner' ? 'Owner' : 'Member'}</span></div>
       </div>
-      <p class="muted">Share the join code above with a household member — they can enter it when they sign up to see and edit the same accounts, transactions and budgets.</p>
-      <div class="section-head"><h2>Members</h2></div>
-      <div class="kv-list">${members.map(m => `<div class="kv-row"><span class="kv-k">${nameFor(m.user_id)}</span><span class="kv-v">${m.role}</span></div>`).join('')}</div>
+      <p class="muted">Share the join code above so someone else can join this exact household.</p>
+
+      ${h.role === 'owner' ? `<button class="btn btn-ghost btn-block" id="hd-sharing" style="margin-top:10px;">🗂️ Category Sharing</button>` : ''}
+
+      <div class="sep-title">Members</div>
+      <div class="kv-list">${members.map(m => `<div class="kv-row"><span class="kv-k">${nameFor(m.user_id)}${m.user_id===Store.currentUser().id?'':''}</span><span class="kv-v">${m.role}${(h.role==='owner' && m.role!=='owner') ? ` · <button class="link-btn" data-make-owner="${m.user_id}">Make Owner</button>` : ''}</span></div>`).join('')}</div>
+
+      <div class="modal-actions">
+        ${h.role === 'owner'
+          ? `<button class="btn btn-danger btn-block" id="hd-delete">Delete Household</button>`
+          : `<button class="btn btn-danger btn-block" id="hd-leave">Leave Household</button>`}
+      </div>
     `;
+    const backBtn = $('#hd-switch', root);
+    if (backBtn) backBtn.onclick = async () => {
+      await Store.switchHousehold(h.id);
+      showSuccess('✓ Switched\n' + h.name);
+      goNav('home'); refreshCurrentView();
+    };
+    $('#hd-sharing', root) && ($('#hd-sharing', root).onclick = () => openCategorySharing(h.id, h.name));
+    $all('[data-make-owner]', root).forEach(b => b.onclick = () => confirmDialog(
+      'Transfer Ownership?',
+      `Are you sure you want to make ${nameFor(b.dataset.makeOwner)} the owner of "${h.name}"? You will become a regular member. This action cannot be undone by you alone.`,
+      'Transfer', async () => {
+        try { await Store.transferOwnershipFlow(h.id, b.dataset.makeOwner); showSuccess('✓ Ownership Transferred'); openHouseholdDetail(h.id); }
+        catch (e) { toast(e.message); }
+      }, true));
+    $('#hd-leave', root) && ($('#hd-leave', root).onclick = () => confirmDialog(
+      'Leave Household?',
+      `Are you sure you want to leave "${h.name}"? This action cannot be undone — you'll need a new invite to rejoin.`,
+      'Leave', async () => {
+        try {
+          await Store.leaveHouseholdFlow(h.id);
+          showSuccess('Left household');
+          if (isActive) { await Store.loadHousehold(); if (Store.household()) await Store.switchHousehold(Store.household().id); }
+          subpageBack(); refreshCurrentView();
+        } catch (e) { toast(e.message); }
+      }, true));
+    $('#hd-delete', root) && ($('#hd-delete', root).onclick = () => confirmDialog(
+      'Delete Household?',
+      `Are you sure you want to permanently delete "${h.name}"? This removes it for every member (${members.length} total) and permanently deletes all its accounts, categories, transactions and budgets. This action cannot be undone.`,
+      'Delete Forever', async () => {
+        try {
+          await Store.deleteHouseholdFlow(h.id);
+          showSuccess('🗑 Household Deleted');
+          if (isActive) { await Store.loadHousehold(); if (Store.household()) await Store.switchHousehold(Store.household().id); }
+          subpageBack(); refreshCurrentView();
+        } catch (e) { toast(e.message); }
+      }, true));
+  });
+}
+
+// ---------- Category Sharing (owner-only) ----------
+function openCategorySharing(householdId, householdName) {
+  openSubpage('Category Sharing', async (root) => {
+    root.innerHTML = `<div class="empty-hint">Loading…</div>`;
+    const { data: cats, error } = await Supa.client.from('categories').select('*').eq('household_id', householdId).eq('archived', false).order('type').order('sort_order');
+    if (error) { root.innerHTML = `<div class="empty-hint">${error.message}</div>`; return; }
+    const groups = { income: 'Income', expense: 'Expense', financial: 'Money Borrowed / Lent / Other' };
+    root.innerHTML = `
+      <p class="muted">Choose which categories members of "${householdName}" can see and use. Turning a category off only hides it from members — it stays visible to you, and no past transactions are deleted.</p>
+      ${Object.keys(groups).map(type => `
+        <div class="sep-title">${groups[type]}</div>
+        <div id="share-${type}"></div>
+      `).join('')}
+    `;
+    Object.keys(groups).forEach(type => {
+      const list = cats.filter(c => c.type === type);
+      $('#share-' + type, root).innerHTML = list.map(c => `
+        <div class="share-row">
+          <div class="sr-ico ${c.color}">${c.icon}</div>
+          <div class="sr-name">${c.name}</div>
+          <label class="toggle-switch"><input type="checkbox" data-cat="${c.id}" ${c.shared ? 'checked' : ''}><span class="toggle-slider"></span></label>
+        </div>`).join('') || `<div class="empty-hint">No categories yet.</div>`;
+    });
+    $all('input[data-cat]', root).forEach(input => input.onchange = async () => {
+      try { await Supa.setCategoryShared(input.dataset.cat, input.checked); toast(input.checked ? 'Shared with members' : 'Hidden from members'); }
+      catch (e) { input.checked = !input.checked; toast(e.message); }
+    });
   });
 }
 
@@ -1582,11 +1776,22 @@ function openAccountDetail(accId) {
         <div class="kv-row"><span class="kv-k">Credits</span><span class="kv-v" style="color:var(--green)">${fmt(credits)}</span></div>
         <div class="kv-row"><span class="kv-k">Debits</span><span class="kv-v" style="color:var(--red)">${fmt(debits)}</span></div>
       </div>
-      <div class="modal-actions"><button class="btn btn-ghost btn-block" id="acd-edit">Edit Account</button></div>
+      <div class="modal-actions">
+        <button class="btn btn-ghost btn-block" id="acd-edit">Edit Account</button>
+        <button class="btn btn-danger btn-block" id="acd-delete">Delete Account</button>
+      </div>
       <div class="section-head"><h2>Transactions</h2></div>
       <div id="acd-list" class="txn-list">${txns.length?txns.map(txnRowHtml).join(''):'<div class="empty-hint">No transactions yet.</div>'}</div>`;
     $all('.txn-row', root).forEach(r => r.onclick = () => openTransactionDetail(r.dataset.id));
     $('#acd-edit', root).onclick = () => openAccountEditor(acc.id, () => openAccountDetail(acc.id));
+    $('#acd-delete', root).onclick = () => confirmDialog(
+      'Delete this account?',
+      `Are you sure you want to delete "${acc.name}"? This action cannot be undone.${txns.length ? ` Its ${txns.length} past transaction(s) stay in your records for history, but you won't be able to pick this account for new ones.` : ''}`,
+      'Delete', async () => {
+        await Store.archiveAccount(acc.id);
+        showSuccess('🗑 Account Deleted');
+        subpageBack();
+      }, true);
   });
 }
 

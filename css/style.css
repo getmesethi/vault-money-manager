@@ -429,6 +429,26 @@ input,select,textarea{ font-family:inherit; }
 /* count-up number transition helper */
 .num-anim{ display:inline-block; transition:opacity .15s ease; }
 
+/* =========================== Centered separator section title =========================== */
+.sep-title{ display:flex; align-items:center; gap:12px; margin:22px 2px 12px; color:var(--text-faint); font-size:12px; font-weight:800; text-transform:uppercase; letter-spacing:.06em; }
+.sep-title::before, .sep-title::after{ content:''; flex:1; height:1px; background:var(--border); }
+.household-card{ background:var(--surface); border-radius:16px; padding:16px; margin-bottom:10px; box-shadow:var(--shadow-sm); cursor:pointer; display:flex; align-items:center; gap:14px; }
+.household-card.active{ border:2px solid var(--primary); }
+.household-card .hc-ico{ font-size:22px; width:44px; height:44px; border-radius:12px; background:var(--primary-dim); display:flex; align-items:center; justify-content:center; flex:0 0 auto; }
+.household-card .hc-mid{ flex:1; min-width:0; }
+.household-card .hc-name{ font-weight:700; font-size:15px; }
+.household-card .hc-sub{ font-size:12px; color:var(--text-dim); margin-top:2px; }
+.household-card .hc-badge{ font-size:11px; font-weight:800; padding:4px 10px; border-radius:999px; background:var(--primary-dim); color:var(--primary); white-space:nowrap; }
+.share-row{ display:flex; align-items:center; gap:12px; background:var(--surface); border-radius:14px; padding:12px 14px; margin-bottom:8px; box-shadow:var(--shadow-sm); }
+.share-row .sr-ico{ width:32px; height:32px; border-radius:9px; display:flex; align-items:center; justify-content:center; font-size:15px; flex:0 0 auto; }
+.share-row .sr-name{ flex:1; font-weight:600; font-size:14px; }
+.toggle-switch{ position:relative; display:inline-block; width:42px; height:24px; flex:0 0 auto; }
+.toggle-switch input{ opacity:0; width:0; height:0; }
+.toggle-slider{ position:absolute; cursor:pointer; inset:0; background:var(--border); border-radius:999px; transition:.15s; }
+.toggle-slider::before{ content:''; position:absolute; width:18px; height:18px; left:3px; top:3px; background:#fff; border-radius:50%; transition:.15s; }
+.toggle-switch input:checked + .toggle-slider{ background:var(--primary); }
+.toggle-switch input:checked + .toggle-slider::before{ transform:translateX(18px); }
+
 /* =========================== AI Assistant =========================== */
 .ai-fab{
   position:fixed; right:16px; bottom:calc(var(--nav-h) + 18px); width:52px; height:52px; border-radius:50%;

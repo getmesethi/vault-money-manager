@@ -75,6 +75,35 @@ const Supa = (() => {
     if (error) throw error;
     return data;
   }
+  async function leaveHousehold(householdId) {
+    const { error } = await client.rpc('leave_household', { p_household_id: householdId });
+    if (error) throw error;
+  }
+  async function transferOwnership(householdId, newOwnerId) {
+    const { error } = await client.rpc('transfer_household_ownership', { p_household_id: householdId, p_new_owner_id: newOwnerId });
+    if (error) throw error;
+  }
+  async function deleteHousehold(householdId) {
+    const { error } = await client.rpc('delete_household', { p_household_id: householdId });
+    if (error) throw error;
+  }
+  async function setCategoryShared(categoryId, shared) {
+    const { data, error } = await client.rpc('set_category_shared', { p_category_id: categoryId, p_shared: shared });
+    if (error) throw error;
+    return data;
+  }
+  async function deleteUserAccount() {
+    const { data: { session } } = await client.auth.getSession();
+    if (!session) throw new Error('Not signed in.');
+    const resp = await fetch(`${URL}/functions/v1/delete-account`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
+      body: JSON.stringify({ confirm: 'DELETE' })
+    });
+    const data = await resp.json();
+    if (!resp.ok) throw new Error(data.error || 'Could not delete account.');
+    return data;
+  }
   async function getProfiles(userIds) {
     if (!userIds.length) return [];
     const { data, error } = await client.from('profiles').select('*').in('id', userIds);
@@ -145,6 +174,7 @@ const Supa = (() => {
   return {
     client, getSession, onAuthStateChange, signUpEmail, signInEmail, signInGoogle, resetPassword, signOut,
     myMemberships, createHousehold, joinHousehold, getMembers, getProfiles, updateOwnProfile,
+    leaveHousehold, transferOwnership, deleteHousehold, setCategoryShared, deleteUserAccount,
     listAll, insertRow, updateRow, deleteRow, upsertRows,
     subscribeHousehold, unsubscribe, askAssistant
   };

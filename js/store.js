@@ -56,13 +56,48 @@ const Store = (() => {
   // ---------------- Household ----------------
   function household() { return _household; }
 
-  async function loadHousehold() {
+  function toHouseholdObj(r) {
+    return { id: r.households.id, name: r.households.name, joinCode: r.households.join_code, ownerId: r.households.owner_id, role: r.role };
+  }
+  function activeHouseholdKey(userId) { return 'vp.activeHousehold.' + userId; }
+
+  async function listMyHouseholds() {
     const rows = await Supa.myMemberships();
-    if (!rows.length) { _household = null; return null; }
-    const r = rows[0]; // simple model: one household per user
-    _household = { id: r.households.id, name: r.households.name, joinCode: r.households.join_code, ownerId: r.households.owner_id, role: r.role };
+    return rows.map(toHouseholdObj);
+  }
+
+  async function loadHousehold() {
+    const list = await listMyHouseholds();
+    if (!list.length) { _household = null; return null; }
+    const uid = currentUser().id;
+    const savedId = localStorage.getItem(activeHouseholdKey(uid));
+    _household = list.find(h => h.id === savedId) || list[0];
+    localStorage.setItem(activeHouseholdKey(uid), _household.id);
     return _household;
   }
+
+  async function switchHousehold(householdId) {
+    const list = await listMyHouseholds();
+    const h = list.find(x => x.id === householdId);
+    if (!h) throw new Error('Household not found');
+    _household = h;
+    localStorage.setItem(activeHouseholdKey(currentUser().id), h.id);
+    stopRealtime();
+    await loadAllData();
+    startRealtime();
+    return h;
+  }
+
+  async function leaveHouseholdFlow(householdId) { await Supa.leaveHousehold(householdId); }
+  async function transferOwnershipFlow(householdId, newOwnerId) { await Supa.transferOwnership(householdId, newOwnerId); }
+  async function deleteHouseholdFlow(householdId) { await Supa.deleteHousehold(householdId); }
+  async function setCategoryShared(categoryId, shared) {
+    const row = await Supa.setCategoryShared(categoryId, shared);
+    const cat = _data.categories.find(c => c.id === categoryId);
+    if (cat) cat.shared = row.shared;
+    return cat;
+  }
+  async function deleteMyAccountForever() { return Supa.deleteUserAccount(); }
 
   async function createHouseholdFlow(name, openingBalance, openingAccountType, seedDefaults) {
     const h = await Supa.createHousehold(name);
@@ -100,7 +135,7 @@ const Store = (() => {
   // ---------------- Row <-> app-object mapping ----------------
   const mapFrom = {
     accounts: r => ({ id: r.id, name: r.name, type: r.type, openingBalance: Number(r.opening_balance), archived: r.archived }),
-    categories: r => ({ id: r.id, name: r.name, type: r.type, color: r.color, icon: r.icon, order: r.sort_order, archived: r.archived }),
+    categories: r => ({ id: r.id, name: r.name, type: r.type, color: r.color, icon: r.icon, order: r.sort_order, archived: r.archived, shared: r.shared !== false }),
     transactions: r => ({
       id: r.id, type: r.type, amount: Number(r.amount), categoryId: r.category_id, accountId: r.account_id,
       paymentMethod: r.payment_method, date: r.date, time: r.time || '', description: r.description || '',
@@ -145,11 +180,13 @@ const Store = (() => {
     _data[KEY[t]] = rows.map(mapFrom[t]);
   }
 
+  let _realtimeCallback = null;
   function startRealtime(onChange) {
     stopRealtime();
+    if (onChange) _realtimeCallback = onChange;
     _channel = Supa.subscribeHousehold(_household.id, async (table, payload) => {
       await refreshTable(table);
-      if (onChange) onChange(table);
+      if (_realtimeCallback) _realtimeCallback(table);
     });
   }
   function stopRealtime() { if (_channel) { Supa.unsubscribe(_channel); _channel = null; } }
@@ -185,6 +222,7 @@ const Store = (() => {
 
   const addAccount = obj => addRow('accounts', obj);
   const updateAccount = (id, patch) => updateRow('accounts', id, patch);
+  const archiveAccount = id => updateRow('accounts', id, { archived: true });
 
   const addBudget = obj => addRow('budgets', obj);
   const updateBudget = (id, patch) => updateRow('budgets', id, patch);
@@ -282,10 +320,12 @@ const Store = (() => {
     getPrefs, setPrefs,
     refreshSession, session, currentUser, onAuthStateChange, signUpEmail, signInEmail, signInGoogle, resetPassword, signOut,
     household, loadHousehold, createHouseholdFlow, joinHouseholdFlow, getMembers, getProfiles, updateOwnProfile,
+    listMyHouseholds, switchHousehold, leaveHouseholdFlow, transferOwnershipFlow, deleteHouseholdFlow,
+    setCategoryShared, deleteMyAccountForever,
     data, loadAllData, refreshTable, startRealtime, stopRealtime,
     addTransaction, updateTransaction, deleteTransaction,
     addCategory, updateCategory,
-    addAccount, updateAccount,
+    addAccount, updateAccount, archiveAccount,
     addBudget, updateBudget, deleteBudget,
     addRecurring, updateRecurring, deleteRecurring,
     addUpi, updateUpi, deleteUpi,
