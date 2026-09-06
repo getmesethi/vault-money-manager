@@ -392,6 +392,9 @@ input,select,textarea{ font-family:inherit; }
 .kv-row:last-child{ border-bottom:none; }
 .kv-row .kv-k{ color:var(--text-dim); }
 .kv-row .kv-v{ font-weight:700; text-align:right; }
+.kv-row-clickable{ cursor:pointer; }
+.kv-row-clickable:active{ background:var(--bg); }
+.kv-chev{ color:var(--text-dim); font-weight:400; margin-left:2px; }
 
 /* account cards in accounts manager */
 .account-card{ background:var(--surface); border-radius:16px; padding:16px; margin-bottom:10px; box-shadow:var(--shadow-sm); display:flex; justify-content:space-between; align-items:center; cursor:pointer; }
@@ -449,6 +452,7 @@ input,select,textarea{ font-family:inherit; }
 .share-row .sr-name{ flex:1; font-weight:600; font-size:14px; }
 .share-row-master{ background:var(--primary-soft, rgba(99,102,241,.1)); border:1px solid var(--primary); }
 .share-row-master .sr-name{ font-weight:700; }
+.share-row-disabled{ opacity:.5; }
 .toggle-switch{ position:relative; display:inline-block; width:42px; height:24px; flex:0 0 auto; }
 .toggle-switch input{ opacity:0; width:0; height:0; }
 .toggle-slider{ position:absolute; cursor:pointer; inset:0; background:var(--border); border-radius:999px; transition:.15s; }

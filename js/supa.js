@@ -108,6 +108,20 @@ const Supa = (() => {
     if (error) throw error;
     return data;
   }
+  // Per-member override on top of the household-wide categories.shared
+  // master switch (see categories_select_member RLS policy). Household OFF
+  // always wins regardless of what's stored here.
+  async function setCategoryMemberShared(categoryId, userId, shared) {
+    const { data, error } = await client.rpc('set_category_member_shared', { p_category_id: categoryId, p_user_id: userId, p_shared: shared });
+    if (error) throw error;
+    return data;
+  }
+  async function getCategoryMemberShares(categoryIds) {
+    if (!categoryIds.length) return [];
+    const { data, error } = await client.from('category_member_shares').select('category_id, user_id, shared').in('category_id', categoryIds);
+    if (error) throw error;
+    return data;
+  }
   async function deleteUserAccount() {
     const { data: { session } } = await client.auth.getSession();
     if (!session) throw new Error('Not signed in.');
@@ -191,6 +205,7 @@ const Supa = (() => {
     client, getSession, onAuthStateChange, signUpEmail, signInEmail, signInGoogle, resetPassword, signOut,
     myMemberships, createHousehold, joinHousehold, getMembers, getProfiles, updateOwnProfile,
     renameHousehold, leaveHousehold, transferOwnership, deleteHousehold, setCategoryShared, deleteUserAccount,
+    setCategoryMemberShared, getCategoryMemberShares,
     listAll, insertRow, updateRow, deleteRow, upsertRows,
     subscribeHousehold, unsubscribe, askAssistant
   };

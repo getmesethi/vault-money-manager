@@ -102,6 +102,8 @@ const Store = (() => {
     return cat;
   }
   async function deleteMyAccountForever() { return Supa.deleteUserAccount(); }
+  async function setCategoryMemberShared(categoryId, userId, shared) { return Supa.setCategoryMemberShared(categoryId, userId, shared); }
+  async function getCategoryMemberShares(categoryIds) { return Supa.getCategoryMemberShares(categoryIds); }
 
   async function createHouseholdFlow(name, openingBalance, openingAccountType, seedDefaults) {
     const h = await Supa.createHousehold(name);
@@ -325,7 +327,7 @@ const Store = (() => {
     refreshSession, session, currentUser, onAuthStateChange, signUpEmail, signInEmail, signInGoogle, resetPassword, signOut,
     household, loadHousehold, createHouseholdFlow, joinHouseholdFlow, getMembers, getProfiles, updateOwnProfile,
     listMyHouseholds, switchHousehold, renameHouseholdFlow, leaveHouseholdFlow, transferOwnershipFlow, deleteHouseholdFlow,
-    setCategoryShared, deleteMyAccountForever,
+    setCategoryShared, deleteMyAccountForever, setCategoryMemberShared, getCategoryMemberShares,
     data, loadAllData, refreshTable, startRealtime, stopRealtime,
     addTransaction, updateTransaction, deleteTransaction,
     addCategory, updateCategory,

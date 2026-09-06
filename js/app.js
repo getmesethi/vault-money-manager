@@ -1561,7 +1561,20 @@ function openDrawerPage(page) {
 
 // ---------- Household manager ----------
 // ---------- My Households (multi-household list + switcher) ----------
-function openHouseholdManager() { openHouseholdsList(); }
+function openHouseholdManager() {
+  // Most people only ever have one household — jump straight to its detail
+  // screen instead of making them tap through a 1-item list every time.
+  // Create New / Join Existing stay reachable via the "+ Add Another
+  // Household" link at the bottom of that detail screen (Priority 1: both
+  // must always be reachable together, never gated behind having 0 already).
+  (async () => {
+    try {
+      const list = await Store.listMyHouseholds();
+      if (list.length === 1) openHouseholdDetail(list[0].id);
+      else openHouseholdsList();
+    } catch (e) { openHouseholdsList(); }
+  })();
+}
 
 function openHouseholdsList() {
   openSubpage('My Households', async (root) => {
@@ -1680,13 +1693,21 @@ function openHouseholdDetail(householdId) {
       ${h.role === 'owner' ? `<button class="btn btn-ghost btn-block" id="hd-sharing" style="margin-top:10px;">🗂️ Category Sharing</button>` : ''}
 
       <div class="sep-title">Members</div>
-      <div class="kv-list">${members.map(m => `<div class="kv-row"><span class="kv-k">${nameFor(m.user_id)}${m.user_id===Store.currentUser().id?'':''}</span><span class="kv-v">${m.role}${(h.role==='owner' && m.role!=='owner') ? ` · <button class="link-btn" data-make-owner="${m.user_id}">Make Owner</button>` : ''}</span></div>`).join('')}</div>
+      <div class="kv-list">${members.map(m => {
+        const canManage = h.role === 'owner' && m.role !== 'owner';
+        return `<div class="kv-row${canManage ? ' kv-row-clickable' : ''}" ${canManage ? `data-member="${m.user_id}" data-member-name="${nameFor(m.user_id)}"` : ''}>
+          <span class="kv-k">${nameFor(m.user_id)}</span>
+          <span class="kv-v">${m.role}${canManage ? ` · <button class="link-btn" data-make-owner="${m.user_id}">Make Owner</button>` : ''}${canManage ? ' <span class="kv-chev">›</span>' : ''}</span>
+        </div>`;
+      }).join('')}</div>
+      ${h.role === 'owner' ? `<p class="muted" style="margin-top:-6px;">Tap a member to control which categories they can see.</p>` : ''}
 
       <div class="modal-actions">
         ${h.role === 'owner'
           ? `<button class="btn btn-danger btn-block" id="hd-delete">Delete Household</button>`
           : `<button class="btn btn-danger btn-block" id="hd-leave">Leave Household</button>`}
       </div>
+      <button class="btn btn-ghost btn-block" id="hd-add-another" style="margin-top:10px;">+ Add Another Household</button>
     `;
     const backBtn = $('#hd-switch', root);
     if (backBtn) backBtn.onclick = async () => {
@@ -1696,6 +1717,11 @@ function openHouseholdDetail(householdId) {
     };
     $('#hd-sharing', root) && ($('#hd-sharing', root).onclick = () => openCategorySharing(h.id, h.name));
     $('#hd-rename', root) && ($('#hd-rename', root).onclick = () => openRenameHousehold(h, () => openHouseholdDetail(h.id)));
+    $('#hd-add-another', root).onclick = () => openHouseholdsList();
+    $all('[data-member]', root).forEach(row => row.onclick = (e) => {
+      if (e.target.closest('[data-make-owner]')) return; // let Make Owner handle its own click
+      openMemberCategorySharing(h.id, h.name, row.dataset.member, row.dataset.memberName);
+    });
     $all('[data-make-owner]', root).forEach(b => b.onclick = () => confirmDialog(
       'Transfer Ownership?',
       `Are you sure you want to make ${nameFor(b.dataset.makeOwner)} the owner of "${h.name}"? You will become a regular member. This action cannot be undone by you alone.`,
@@ -1793,6 +1819,103 @@ function openCategorySharing(householdId, householdName) {
             c.shared = row.shared;
           }));
           toast(`${targetShared ? 'Shared' : 'Hidden'} all ${CATEGORY_TYPE_SECTIONS.find(s => s.type === type).label} categories`);
+          $('#share-sections', root).innerHTML = renderSections();
+          wireIndividual();
+        } catch (e) {
+          toast(e.message);
+          $('#share-quick', root).innerHTML = renderQuickToggles();
+          wireQuick();
+        } finally {
+          input.disabled = false;
+        }
+      });
+    }
+    wireIndividual();
+    wireQuick();
+  });
+}
+
+// ---------- Per-Member Category Sharing (owner-only) ----------
+// Layered on top of the household-wide Category Sharing master switch: a
+// category the owner turned OFF for the whole household stays off for
+// EVERY member no matter what's set here (data layer enforces this via
+// category_member_shares + the categories RLS policy, not just the UI).
+function openMemberCategorySharing(householdId, householdName, memberUserId, memberName) {
+  openSubpage(`${memberName}'s Categories`, async (root) => {
+    root.innerHTML = `<div class="empty-hint">Loading…</div>`;
+    const { data: cats, error } = await Supa.client.from('categories').select('*').eq('household_id', householdId).eq('archived', false).order('type').order('sort_order');
+    if (error) { root.innerHTML = `<div class="empty-hint">${error.message}</div>`; return; }
+    const overrides = await Store.getCategoryMemberShares(cats.map(c => c.id));
+    const overrideFor = (catId) => overrides.find(o => o.category_id === catId && o.user_id === memberUserId);
+    function isVisible(c) {
+      if (c.shared === false) return false; // household-wide OFF always wins
+      const o = overrideFor(c.id);
+      return o ? o.shared !== false : true; // default: visible
+    }
+
+    function renderQuickToggles() {
+      return CATEGORY_TYPE_SECTIONS.map(section => {
+        const list = cats.filter(c => c.type === section.type && c.shared !== false);
+        if (!list.length) return '';
+        const allOn = list.every(isVisible);
+        return `
+        <div class="share-row share-row-master" data-master="${section.type}">
+          <div class="sr-name"><strong>${section.label}</strong> <span class="muted">(${list.length})</span></div>
+          <label class="toggle-switch"><input type="checkbox" data-master-toggle="${section.type}" ${allOn ? 'checked' : ''}><span class="toggle-slider"></span></label>
+        </div>`;
+      }).join('');
+    }
+    function renderSections() {
+      return CATEGORY_TYPE_SECTIONS.map(section => {
+        const list = cats.filter(c => c.type === section.type);
+        if (!list.length) return '';
+        return `
+        <div class="sep-title">${section.label}</div>
+        <div>${list.map(c => {
+          const hardOff = c.shared === false;
+          const on = isVisible(c);
+          return `
+          <div class="share-row${hardOff ? ' share-row-disabled' : ''}">
+            <div class="sr-ico ${c.color}">${c.icon}</div>
+            <div class="sr-name">${c.name}${hardOff ? ' <span class="muted">(off for everyone)</span>' : ''}</div>
+            <label class="toggle-switch"><input type="checkbox" data-cat="${c.id}" ${on ? 'checked' : ''} ${hardOff ? 'disabled' : ''}><span class="toggle-slider"></span></label>
+          </div>`;
+        }).join('')}</div>`;
+      }).join('') || `<div class="empty-hint">No categories yet.</div>`;
+    }
+
+    root.innerHTML = `
+      <p class="muted">Choose which categories <strong>${memberName}</strong> can see and use in "${householdName}" — independent of any other member. A category that's off for the whole household (via Category Sharing) stays off for everyone regardless of what's set here.</p>
+      <div class="sep-title">Quick Toggle by Type</div>
+      <div id="share-quick">${renderQuickToggles()}</div>
+      <div id="share-sections">${renderSections()}</div>
+    `;
+
+    function wireIndividual() {
+      $all('input[data-cat]', root).forEach(input => input.onchange = async () => {
+        try {
+          const row = await Store.setCategoryMemberShared(input.dataset.cat, memberUserId, input.checked);
+          const idx = overrides.findIndex(o => o.category_id === input.dataset.cat && o.user_id === memberUserId);
+          if (idx >= 0) overrides[idx] = row; else overrides.push(row);
+          toast(input.checked ? `Shown to ${memberName}` : `Hidden from ${memberName}`);
+          $('#share-quick', root).innerHTML = renderQuickToggles();
+          wireQuick();
+        } catch (e) { input.checked = !input.checked; toast(e.message); }
+      });
+    }
+    function wireQuick() {
+      $all('input[data-master-toggle]', root).forEach(input => input.onchange = async () => {
+        const type = input.dataset.masterToggle;
+        const targetShared = input.checked;
+        const list = cats.filter(c => c.type === type && c.shared !== false);
+        input.disabled = true;
+        try {
+          await Promise.all(list.map(async c => {
+            const row = await Store.setCategoryMemberShared(c.id, memberUserId, targetShared);
+            const idx = overrides.findIndex(o => o.category_id === c.id && o.user_id === memberUserId);
+            if (idx >= 0) overrides[idx] = row; else overrides.push(row);
+          }));
+          toast(`${targetShared ? 'Shown to' : 'Hidden from'} ${memberName}: all ${CATEGORY_TYPE_SECTIONS.find(s => s.type === type).label} categories`);
           $('#share-sections', root).innerHTML = renderSections();
           wireIndividual();
         } catch (e) {
