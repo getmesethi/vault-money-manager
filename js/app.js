@@ -829,6 +829,20 @@ function openTxnSheet(opts) {
       <label class="field-label">Description</label>
       <input class="input" id="tf-desc" placeholder="What was this transaction for?" value="${editing ? (editing.description||'') : (opts.description||'')}">
 
+      ${!editing ? `
+      <label class="switch-row" style="margin-top:20px;"><span>🔔 Also track as a recurring Due</span><input type="checkbox" id="tf-track-due"></label>
+      <div id="tf-due-fields" class="hidden">
+        <p class="muted" style="margin-top:-6px;">Adds this to your Dues list too — remaining balance, next payment date, and a reminder on the Dashboard when it's coming up.</p>
+        <label class="field-label">Remaining Balance (optional)</label>
+        <input class="input" id="tf-due-remaining" type="number" inputmode="decimal" min="0" step="0.01" placeholder="e.g. total left on a loan">
+        <label class="field-label">Next Payment Date</label>
+        <input class="input" id="tf-due-date" type="date">
+        <label class="field-label">Repeats</label>
+        <select class="input" id="tf-due-repeat">
+          ${Object.keys(DUE_REPEAT_LABEL).map(k => `<option value="${k}" ${k === 'monthly' ? 'selected' : ''}>${DUE_REPEAT_LABEL[k]}</option>`).join('')}
+        </select>
+      </div>` : ''}
+
       <p class="error-text hidden" id="tf-error"></p>
       <button class="btn btn-primary btn-block" id="tf-save" style="margin-top:20px;">${editing ? 'Save Changes' : 'Save Transaction'}</button>
     </div>`;
@@ -865,6 +879,13 @@ function openTxnSheet(opts) {
     $('#tf-upi-wrap').classList.toggle('hidden', $('#tf-method').value !== 'UPI');
   }
   $('#tf-method').onchange = syncUpiVisibility; syncUpiVisibility();
+
+  const trackDueBox = $('#tf-track-due');
+  if (trackDueBox) {
+    const dueDateInput = $('#tf-due-date');
+    if (dueDateInput && !dueDateInput.value) dueDateInput.value = M.todayStr();
+    trackDueBox.onchange = () => $('#tf-due-fields').classList.toggle('hidden', !trackDueBox.checked);
+  }
 
   $('#tf-save').onclick = () => saveTxnFromSheet({ editing, curType: () => curType, isReversal });
 }
@@ -926,8 +947,26 @@ async function saveTxnFromSheet(ctx) {
     if (method === 'UPI' && upiId && !data.upiIds.some(u => u.upiId === upiId)) {
       await Store.addUpi({ upiId, provider: '', linkedAccountName: '' });
     }
+    let trackedDue = false;
+    const trackDueBox = $('#tf-track-due');
+    if (trackDueBox && trackDueBox.checked) {
+      const cat = data.categories.find(c => c.id === categoryId);
+      const remainingRaw = $('#tf-due-remaining').value.trim();
+      const dueDate = $('#tf-due-date').value || date;
+      try {
+        await Store.addDue({
+          name: (cat ? cat.name : description) || 'Due',
+          amount,
+          remainingBalance: remainingRaw === '' ? null : parseFloat(remainingRaw),
+          nextPaymentDate: dueDate,
+          repeat: $('#tf-due-repeat').value,
+          notes: description || '',
+        });
+        trackedDue = true;
+      } catch (e) { /* transaction already saved; surface via toast, don't block the flow */ toast('Transaction saved, but the Due could not be added: ' + e.message); }
+    }
     closeTxnSheet();
-    showSuccess(`✓ Transaction ${ctx.editing ? 'Updated' : 'Added'}\n${fmt(amount)} ${(TXN_TYPE_META[type] || TXN_TYPE_META.debit).label}`);
+    showSuccess(`✓ Transaction ${ctx.editing ? 'Updated' : 'Added'}\n${fmt(amount)} ${(TXN_TYPE_META[type] || TXN_TYPE_META.debit).label}${trackedDue ? ' · added to Dues' : ''}`);
     refreshCurrentView();
   } catch (e) {
     showErr('Could not save: ' + e.message);
@@ -2330,7 +2369,11 @@ function openDuesList() {
   openSubpage('Dues', (root) => {
     function draw() {
       const data = D();
-      const dues = data.dues.filter(d => !d.archived).slice().sort((a, b) => M.daysUntil(a.nextPaymentDate) - M.daysUntil(b.nextPaymentDate));
+      // Defensive: if this device is ever running a JS file mismatch again
+      // (old store.js that predates the dues table, paired with new app.js),
+      // fall back to an empty list instead of throwing and leaving the
+      // screen stuck on nothing.
+      const dues = (data.dues || []).filter(d => !d.archived).slice().sort((a, b) => M.daysUntil(a.nextPaymentDate) - M.daysUntil(b.nextPaymentDate));
       root.innerHTML = `
         <p class="muted">Track bills and EMIs you owe — remaining balance, next payment date, and a reminder banner on the Dashboard when one's coming up. This is a standalone reminder list, separate from your transaction ledger.</p>
         <button class="btn btn-primary btn-block" id="due-add" style="margin-bottom:14px;">+ Add Due</button>
@@ -2377,7 +2420,7 @@ function openDuesList() {
 
 function openDueEditor(dueId, onDone) {
   const data = D();
-  const existing = dueId ? data.dues.find(d => d.id === dueId) : null;
+  const existing = dueId ? (data.dues || []).find(d => d.id === dueId) : null;
   openModal(`
     <h3>${existing ? 'Edit' : 'Add'} Due</h3>
     <label class="field-label">Name</label>
@@ -2427,7 +2470,7 @@ function renderDuesBanner() {
   const holder = $('#dues-banner');
   if (!holder) return;
   const data = D();
-  const urgent = M.upcomingDues(data.dues, 3);
+  const urgent = M.upcomingDues(data.dues || [], 3);
   if (!urgent.length) { holder.innerHTML = ''; return; }
   const top = urgent[0];
   const status = dueStatusLabel(top.due);

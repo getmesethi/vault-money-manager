@@ -185,9 +185,20 @@ const Store = (() => {
 
   async function loadAllData() {
     _data = { accounts: [], categories: [], transactions: [], budgets: [], recurring: [], upiIds: [], dues: [] };
+    // One table failing to load (network blip, a table a stale cached
+    // client doesn't know about yet, etc.) used to reject this whole
+    // Promise.all and leave EVERY collection empty — including accounts/
+    // categories/transactions, which would make the entire app look broken
+    // over one bad table. Isolate each fetch instead: a failure just leaves
+    // that one collection as [] (already the default above) and logs a
+    // warning, so the rest of the app still loads normally.
     await Promise.all(TABLES.map(async t => {
-      const rows = await Supa.listAll(t, _household.id);
-      _data[KEY[t]] = rows.map(mapFrom[t]);
+      try {
+        const rows = await Supa.listAll(t, _household.id);
+        _data[KEY[t]] = rows.map(mapFrom[t]);
+      } catch (e) {
+        console.warn('Failed to load table', t, e);
+      }
     }));
     return _data;
   }
