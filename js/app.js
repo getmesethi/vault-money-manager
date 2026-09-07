@@ -671,20 +671,22 @@ function renderCategoryTotals() {
   const savingsLoans = periodTxns.filter(t => financialIds.has(t.categoryId)).reduce((s, t) => s + t.amount, 0);
   const duesTotal = (data.dues || []).filter(d => !d.archived).reduce((s, d) => s + (d.remainingBalance !== null && d.remainingBalance !== undefined ? d.remainingBalance : d.amount), 0);
 
+  // kind: 'dues' opens the standalone Dues screen; anything else is a
+  // TXN_FILTERS id, and taps jump to Transactions pre-filtered to it.
   const tiles = [
-    { label: 'Income', icon: '🟢', amount: M.sumCredit(periodTxns) },
-    { label: 'Expense', icon: '🔴', amount: M.sumDebit(periodTxns) },
-    { label: 'Borrowed', icon: '🔵', amount: M.sumBorrow(periodTxns) },
-    { label: 'Lent', icon: '🟣', amount: M.sumLend(periodTxns) },
-    { label: 'Dues', icon: '🔔', amount: duesTotal },
-    { label: 'Savings & Loans', icon: '🏦', amount: savingsLoans },
+    { label: 'Income', icon: '🟢', amount: M.sumCredit(periodTxns), kind: 'credit' },
+    { label: 'Expense', icon: '🔴', amount: M.sumDebit(periodTxns), kind: 'debit' },
+    { label: 'Borrowed', icon: '🔵', amount: M.sumBorrow(periodTxns), kind: 'borrow' },
+    { label: 'Lent', icon: '🟣', amount: M.sumLend(periodTxns), kind: 'lend' },
+    { label: 'Dues', icon: '🔔', amount: duesTotal, kind: 'dues' },
+    { label: 'Savings & Loans', icon: '🏦', amount: savingsLoans, kind: 'financial' },
   ];
 
   $('#totals-grid').innerHTML = `
     <div class="tt-header"><button class="tt-eye" id="tt-eye-btn">👁</button></div>
     <div class="tt-tiles">
       ${tiles.map(t => `
-        <div class="total-tile">
+        <div class="total-tile" data-kind="${t.kind}">
           <div class="tt-ico">${t.icon}</div>
           <div class="tt-mid"><div class="tt-label">${t.label}</div><div class="tt-amt num-anim" data-raw="${t.amount}">${fmt(t.amount)}</div></div>
         </div>`).join('')}
@@ -692,10 +694,17 @@ function renderCategoryTotals() {
   `;
 
   let hidden = false;
-  $('#tt-eye-btn').onclick = () => {
+  $('#tt-eye-btn').onclick = (e) => {
+    e.stopPropagation();
     hidden = !hidden;
     $all('.total-tile .tt-amt').forEach(el => { el.textContent = hidden ? '••••••' : fmt(parseFloat(el.dataset.raw)); });
   };
+  $all('.total-tile', $('#totals-grid')).forEach(tile => tile.onclick = () => {
+    const kind = tile.dataset.kind;
+    if (kind === 'dues') { openDuesList(); return; }
+    S.txnFilter.kind = kind;
+    goNav('transactions');
+  });
 }
 
 function periodLabel() { const p = PERIODS.find(p => p.id === S.period); return p ? p.label : ''; }
@@ -1213,7 +1222,7 @@ function openTransactionDetail(txnId) {
 // ===========================================================
 const TXN_FILTERS = [
   { id: 'all', label: 'All' }, { id: 'credit', label: 'Income' }, { id: 'debit', label: 'Expense' },
-  { id: 'borrow', label: 'Borrowed' }, { id: 'lend', label: 'Lent' },
+  { id: 'borrow', label: 'Borrowed' }, { id: 'lend', label: 'Lent' }, { id: 'financial', label: 'Savings & Loans' },
   { id: 'Cash', label: 'Cash' }, { id: 'UPI', label: 'UPI' }, { id: 'Card', label: 'Card' }, { id: 'Bank', label: 'Bank' },
 ];
 function renderTransactionsView() {
@@ -1225,19 +1234,20 @@ function renderTransactionsView() {
   }
   drawTxnList();
 }
-function matchesFilter(t, kind) {
+function matchesFilter(t, kind, categories) {
   if (kind === 'all') return true;
   if (kind === 'credit') return t.type === 'credit';
   if (kind === 'debit') return t.type === 'debit';
   if (kind === 'borrow') return t.type === 'borrow';
   if (kind === 'lend') return t.type === 'lend';
+  if (kind === 'financial') { const c = categories && categories.find(c => c.id === t.categoryId); return !!c && c.type === 'financial'; }
   if (kind === 'Card') return t.paymentMethod === 'Debit Card' || t.paymentMethod === 'Credit Card';
   if (kind === 'Bank') return t.paymentMethod === 'Bank Transfer' || t.paymentMethod === 'Cheque';
   return t.paymentMethod === kind;
 }
 function drawTxnList() {
   const data = D();
-  const filtered = data.transactions.filter(t => matchesFilter(t, S.txnFilter.kind));
+  const filtered = data.transactions.filter(t => matchesFilter(t, S.txnFilter.kind, data.categories));
   if (!filtered.length) { $('#txn-list').innerHTML = `<div class="empty-hint">No transactions yet. Tap + to add one.</div>`; return; }
   const sortId = S.txnFilter.sort || 'newest';
   const list = sortTxns(filtered, sortId);
