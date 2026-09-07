@@ -2355,7 +2355,7 @@ function openDuesList() {
             <button class="btn btn-sm btn-danger" data-del="${d.id}">Delete</button>
           </div>
         </div>`;
-      }).join('') : `<div class="empty-hint">No dues tracked yet. Add a bill or EMI to get reminders here and on your Dashboard.</div>`;
+      }).join('') : `<div class="empty-hint"><div style="font-weight:800; font-size:16px; color:var(--text-dim); margin-bottom:6px;">No Dues</div>Add a bill or EMI to get reminders here and on your Dashboard.</div>`;
 
       $all('[data-paid]', root).forEach(b => b.onclick = async () => {
         try { await Store.markDuePaid(b.dataset.paid); toast('Marked paid.'); draw(); }

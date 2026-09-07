@@ -1,7 +1,7 @@
 // Vault service worker — enables "Add to Home Screen" installability and
 // basic offline access to the app shell. Never caches Supabase API calls;
 // your financial data always comes from the network, live.
-const CACHE_NAME = 'vault-shell-v1';
+const CACHE_NAME = 'vault-shell-v2';
 const SHELL_FILES = [
   './',
   './index.html',
@@ -19,7 +19,17 @@ const SHELL_FILES = [
 ];
 
 self.addEventListener('install', (event) => {
-  event.waitUntil(caches.open(CACHE_NAME).then((cache) => cache.addAll(SHELL_FILES)).then(() => self.skipWaiting()));
+  // cache.addAll() doesn't let us force-bypass the HTTP cache, so a stale
+  // browser-cached response could get baked into a brand-new service worker
+  // version on install — fetch each shell file with {cache:'reload'}
+  // explicitly instead, guaranteeing every update starts from real network.
+  event.waitUntil(
+    caches.open(CACHE_NAME)
+      .then((cache) => Promise.all(SHELL_FILES.map((url) =>
+        fetch(url, { cache: 'reload' }).then((resp) => cache.put(url, resp))
+      )))
+      .then(() => self.skipWaiting())
+  );
 });
 
 self.addEventListener('activate', (event) => {
@@ -37,7 +47,7 @@ self.addEventListener('fetch', (event) => {
   if (event.request.method !== 'GET' || url.origin !== self.location.origin) return;
 
   event.respondWith(
-    fetch(event.request)
+    fetch(event.request, { cache: 'no-store' })
       .then((resp) => {
         const copy = resp.clone();
         caches.open(CACHE_NAME).then((cache) => cache.put(event.request, copy));
