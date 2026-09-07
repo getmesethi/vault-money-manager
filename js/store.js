@@ -152,6 +152,11 @@ const Store = (() => {
     budgets: r => ({ id: r.id, categoryId: r.category_id, amount: Number(r.amount), period: r.period }),
     recurring: r => ({ id: r.id, type: r.type, amount: Number(r.amount), categoryId: r.category_id, accountId: r.account_id, frequency: r.frequency, nextDate: r.next_date, description: r.description || '', active: r.active }),
     upi_ids: r => ({ id: r.id, upiId: r.upi_id, provider: r.provider || '', linkedAccountName: r.linked_account_name || '' }),
+    dues: r => ({
+      id: r.id, name: r.name, amount: Number(r.amount),
+      remainingBalance: r.remaining_balance === null ? null : Number(r.remaining_balance),
+      nextPaymentDate: r.next_payment_date, repeat: r.repeat, notes: r.notes || '', archived: r.archived
+    }),
   };
   const mapTo = {
     accounts: a => ({ household_id: _household.id, name: a.name, type: a.type, opening_balance: a.openingBalance, archived: !!a.archived }),
@@ -165,15 +170,21 @@ const Store = (() => {
     budgets: b => ({ household_id: _household.id, category_id: b.categoryId, amount: b.amount, period: b.period || 'monthly' }),
     recurring: r => ({ household_id: _household.id, type: r.type, amount: r.amount, category_id: r.categoryId, account_id: r.accountId, frequency: r.frequency, next_date: r.nextDate, description: r.description || null, active: r.active !== false }),
     upi_ids: u => ({ household_id: _household.id, upi_id: u.upiId, provider: u.provider || null, linked_account_name: u.linkedAccountName || null }),
+    dues: d => ({
+      household_id: _household.id, name: d.name, amount: d.amount,
+      remaining_balance: d.remainingBalance === undefined ? null : d.remainingBalance,
+      next_payment_date: d.nextPaymentDate, repeat: d.repeat || 'monthly', notes: d.notes || null,
+      archived: !!d.archived, created_by: currentUser() ? currentUser().id : null, updated_at: new Date().toISOString()
+    }),
   };
 
-  const TABLES = ['accounts', 'categories', 'transactions', 'budgets', 'recurring', 'upi_ids'];
-  const KEY = { accounts: 'accounts', categories: 'categories', transactions: 'transactions', budgets: 'budgets', recurring: 'recurring', upi_ids: 'upiIds' };
+  const TABLES = ['accounts', 'categories', 'transactions', 'budgets', 'recurring', 'upi_ids', 'dues'];
+  const KEY = { accounts: 'accounts', categories: 'categories', transactions: 'transactions', budgets: 'budgets', recurring: 'recurring', upi_ids: 'upiIds', dues: 'dues' };
 
   function data() { return _data; }
 
   async function loadAllData() {
-    _data = { accounts: [], categories: [], transactions: [], budgets: [], recurring: [], upiIds: [] };
+    _data = { accounts: [], categories: [], transactions: [], budgets: [], recurring: [], upiIds: [], dues: [] };
     await Promise.all(TABLES.map(async t => {
       const rows = await Supa.listAll(t, _household.id);
       _data[KEY[t]] = rows.map(mapFrom[t]);
@@ -242,6 +253,35 @@ const Store = (() => {
   const addUpi = obj => addRow('upi_ids', obj);
   const updateUpi = (id, patch) => updateRow('upi_ids', id, patch);
   const deleteUpi = id => deleteRow('upi_ids', id);
+
+  const addDue = obj => addRow('dues', obj);
+  const updateDue = (id, patch) => updateRow('dues', id, patch);
+  const deleteDue = id => deleteRow('dues', id);
+  // Marking a due paid: reduce any tracked remaining balance by the payment
+  // amount (floored at 0), then either advance the next due date by its
+  // repeat interval, or archive it outright if it's one-time or the
+  // remaining balance just hit zero (fully paid off).
+  async function markDuePaid(id) {
+    const due = _data.dues.find(d => d.id === id);
+    if (!due) throw new Error('Due not found');
+    const patch = {};
+    let newRemaining = due.remainingBalance;
+    if (newRemaining !== null && newRemaining !== undefined) {
+      newRemaining = Math.max(0, newRemaining - due.amount);
+      patch.remainingBalance = newRemaining;
+    }
+    const fullyPaidOff = newRemaining === 0;
+    if (due.repeat === 'none' || fullyPaidOff) {
+      patch.archived = true;
+    } else {
+      const d = new Date(due.nextPaymentDate + 'T00:00:00');
+      if (due.repeat === 'weekly') d.setDate(d.getDate() + 7);
+      else if (due.repeat === 'yearly') d.setFullYear(d.getFullYear() + 1);
+      else d.setMonth(d.getMonth() + 1); // monthly (default)
+      patch.nextPaymentDate = d.toISOString().slice(0, 10);
+    }
+    return updateDue(id, patch);
+  }
 
   // Bulk import (used by the local->cloud migration and JSON restore)
   async function bulkImport(oldData) {
@@ -336,6 +376,7 @@ const Store = (() => {
     addBudget, updateBudget, deleteBudget,
     addRecurring, updateRecurring, deleteRecurring,
     addUpi, updateUpi, deleteUpi,
+    addDue, updateDue, deleteDue, markDuePaid,
     bulkImport,
     hasLegacyVault, unlockLegacyVault, wipeLegacyVault,
     hasDeviceLock, setDeviceLock, verifyDeviceLock, changeDeviceLock, clearDeviceLock,

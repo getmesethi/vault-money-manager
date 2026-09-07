@@ -604,6 +604,7 @@ function closeCalendarOverlay() { $('#calendar-overlay').classList.add('hidden')
 // ===========================================================
 function renderHome() {
   renderHomeTopbar();
+  renderDuesBanner();
   renderTimeFilterRow();
   renderSummaryScroller();
   renderCategoryGrid();
@@ -701,7 +702,7 @@ function catCardHtml(c, data, range) {
     <div class="cat-card ${c.color}" data-cat="${c.id}">
       ${badge ? `<span class="cat-badge">${badge}</span>` : ''}
       <div class="cat-ico">${c.icon}</div>
-      <div>
+      <div class="cat-mid">
         <div class="cat-name">${c.name}</div>
         <div class="cat-amt">${fmt(total)}</div>
       </div>
@@ -724,7 +725,7 @@ function renderCategoryGrid() {
     if (!list.length) return;
     html += `<div class="sep-title">${section.label}</div><div class="category-grid">${list.map(c => catCardHtml(c, data, range)).join('')}</div>`;
   });
-  html += `<div class="category-grid"><div class="cat-card add-card" id="cat-add-card">+</div></div>`;
+  html += `<div class="category-grid"><div class="cat-card add-card" id="cat-add-card">+ Add Category</div></div>`;
   grid.innerHTML = html;
 
   $all('.cat-card[data-cat]', grid).forEach(card => {
@@ -1498,6 +1499,7 @@ function renderMore() {
 
     <div class="more-section-title">Manage</div>
     <div class="more-row" data-act="categories"><span class="mr-ico">🗂️</span><span class="mr-label">Categories</span><span class="mr-chev">›</span></div>
+    <div class="more-row" data-act="dues"><span class="mr-ico">🔔</span><span class="mr-label">Dues</span><span class="mr-chev">›</span></div>
     <div class="more-row" data-act="accounts"><span class="mr-ico">🏦</span><span class="mr-label">Accounts</span><span class="mr-chev">›</span></div>
     <div class="more-row" data-act="upi"><span class="mr-ico">📲</span><span class="mr-label">UPI IDs</span><span class="mr-chev">›</span></div>
     <div class="more-row" data-act="budgets"><span class="mr-ico">🎯</span><span class="mr-label">Budgets</span><span class="mr-chev">›</span></div>
@@ -1524,6 +1526,7 @@ function handleMoreAction(act) {
   if (act === 'currency') return openCurrencySettings();
   if (act === 'theme') return openThemeSettings();
   if (act === 'categories') return openDrawerPage('categories');
+  if (act === 'dues') return openDrawerPage('dues');
   if (act === 'accounts') return openDrawerPage('accounts');
   if (act === 'upi') return openDrawerPage('upi');
   if (act === 'budgets') return goNav('analytics'), setTimeout(()=>$all('.tab-btn')[1].click(),0);
@@ -1584,6 +1587,7 @@ function openDrawerPage(page) {
   if (page === 'upi') return openUpiManager();
   if (page === 'backup') return openBackupRestore();
   if (page === 'household') return openHouseholdManager();
+  if (page === 'dues') return openDuesList();
 }
 
 // ---------- Household manager ----------
@@ -1662,12 +1666,21 @@ function openCreateAnotherHousehold() {
   $('#ch-save').onclick = async () => {
     const name = $('#ch-name').value.trim();
     if (!name) { $('#ch-err').textContent = 'Enter a household name.'; $('#ch-err').classList.remove('hidden'); return; }
+    // Without this guard, a double-tap (or a slow connection + an impatient
+    // second tap before the modal closes) fires this handler twice and
+    // creates two households with the same name — this was a real reported
+    // bug. Disable immediately; only re-enable on failure.
+    if ($('#ch-save').disabled) return;
+    $('#ch-save').disabled = true;
     try {
       await Store.createHouseholdFlow(name, 0, 'bank', true);
       await Store.switchHousehold(Store.household().id);
       closeModal(); showSuccess('✓ Household Created\n' + name);
       openHouseholdsList(); refreshCurrentView();
-    } catch (e) { $('#ch-err').textContent = e.message; $('#ch-err').classList.remove('hidden'); }
+    } catch (e) {
+      $('#ch-err').textContent = e.message; $('#ch-err').classList.remove('hidden');
+      $('#ch-save').disabled = false;
+    }
   };
 }
 function openJoinAnotherHousehold() {
@@ -1681,12 +1694,17 @@ function openJoinAnotherHousehold() {
   $('#jh-save').onclick = async () => {
     const code = $('#jh-code').value.trim();
     if (!code) { $('#jh-err').textContent = 'Enter a join code.'; $('#jh-err').classList.remove('hidden'); return; }
+    if ($('#jh-save').disabled) return; // same double-tap guard as Create New Household
+    $('#jh-save').disabled = true;
     try {
       const h = await Store.joinHouseholdFlow(code);
       await Store.switchHousehold(h.id);
       closeModal(); showSuccess('✓ Joined Household\n' + h.name);
       openHouseholdsList(); refreshCurrentView();
-    } catch (e) { $('#jh-err').textContent = 'Invalid join code.'; $('#jh-err').classList.remove('hidden'); }
+    } catch (e) {
+      $('#jh-err').textContent = 'Invalid join code.'; $('#jh-err').classList.remove('hidden');
+      $('#jh-save').disabled = false;
+    }
   };
 }
 
@@ -2295,6 +2313,131 @@ function openUpiEditor(upiId, onDone) {
     if (existing) await Store.updateUpi(existing.id, obj); else await Store.addUpi(obj);
     closeModal(); if (onDone) onDone(); toast('UPI ID saved.');
   };
+}
+
+// ---------- Dues (bills/EMIs to pay — a standalone reminder tracker,
+// not linked to transactions/categories) ----------
+function dueStatusLabel(due) {
+  const days = M.daysUntil(due.nextPaymentDate);
+  if (days < 0) return { text: `Overdue by ${-days} day${-days === 1 ? '' : 's'}`, cls: 'due-overdue' };
+  if (days === 0) return { text: 'Due today', cls: 'due-today' };
+  if (days <= 3) return { text: `Due in ${days} day${days === 1 ? '' : 's'}`, cls: 'due-soon' };
+  return { text: `Due ${M.humanDate(due.nextPaymentDate)}`, cls: '' };
+}
+const DUE_REPEAT_LABEL = { none: 'One-time', weekly: 'Weekly', monthly: 'Monthly', yearly: 'Yearly' };
+
+function openDuesList() {
+  openSubpage('Dues', (root) => {
+    function draw() {
+      const data = D();
+      const dues = data.dues.filter(d => !d.archived).slice().sort((a, b) => M.daysUntil(a.nextPaymentDate) - M.daysUntil(b.nextPaymentDate));
+      root.innerHTML = `
+        <p class="muted">Track bills and EMIs you owe — remaining balance, next payment date, and a reminder banner on the Dashboard when one's coming up. This is a standalone reminder list, separate from your transaction ledger.</p>
+        <button class="btn btn-primary btn-block" id="due-add" style="margin-bottom:14px;">+ Add Due</button>
+        <div id="due-list"></div>
+      `;
+      $('#due-list', root).innerHTML = dues.length ? dues.map(d => {
+        const status = dueStatusLabel(d);
+        return `
+        <div class="due-card">
+          <div class="due-top">
+            <div class="due-name">${d.name}</div>
+            <div class="due-amt">${fmt(d.amount)}</div>
+          </div>
+          <div class="due-sub">
+            <span class="due-status ${status.cls}">${status.text}</span>
+            ${d.remainingBalance !== null ? `<span>· ${fmt(d.remainingBalance)} remaining</span>` : ''}
+            <span>· ${DUE_REPEAT_LABEL[d.repeat] || d.repeat}</span>
+          </div>
+          <div class="due-actions">
+            <button class="btn btn-sm btn-primary" data-paid="${d.id}">✓ Mark Paid</button>
+            <button class="btn btn-sm btn-ghost" data-edit="${d.id}">Edit</button>
+            <button class="btn btn-sm btn-danger" data-del="${d.id}">Delete</button>
+          </div>
+        </div>`;
+      }).join('') : `<div class="empty-hint">No dues tracked yet. Add a bill or EMI to get reminders here and on your Dashboard.</div>`;
+
+      $all('[data-paid]', root).forEach(b => b.onclick = async () => {
+        try { await Store.markDuePaid(b.dataset.paid); toast('Marked paid.'); draw(); }
+        catch (e) { toast(e.message); }
+      });
+      $all('[data-edit]', root).forEach(b => b.onclick = () => openDueEditor(b.dataset.edit, draw));
+      $all('[data-del]', root).forEach(b => b.onclick = () => confirmDialog(
+        'Delete This Due?',
+        'Are you sure you want to delete this? This action cannot be undone.',
+        'Delete', async () => {
+          try { await Store.deleteDue(b.dataset.del); draw(); }
+          catch (e) { toast(e.message); }
+        }, true));
+      $('#due-add', root).onclick = () => openDueEditor(null, draw);
+    }
+    draw();
+  });
+}
+
+function openDueEditor(dueId, onDone) {
+  const data = D();
+  const existing = dueId ? data.dues.find(d => d.id === dueId) : null;
+  openModal(`
+    <h3>${existing ? 'Edit' : 'Add'} Due</h3>
+    <label class="field-label">Name</label>
+    <input class="input" id="due-name" placeholder="e.g. Electricity Bill, Car Loan EMI" maxlength="60" value="${existing ? existing.name : ''}">
+    <label class="field-label">Amount (next payment)</label>
+    <input class="input" id="due-amount" type="number" inputmode="decimal" min="0" step="0.01" placeholder="0" value="${existing ? existing.amount : ''}">
+    <label class="field-label">Remaining Balance (optional)</label>
+    <input class="input" id="due-remaining" type="number" inputmode="decimal" min="0" step="0.01" placeholder="e.g. total left on a loan" value="${existing && existing.remainingBalance !== null ? existing.remainingBalance : ''}">
+    <label class="field-label">Next Payment Date</label>
+    <input class="input" id="due-date" type="date" value="${existing ? existing.nextPaymentDate : M.todayStr()}">
+    <label class="field-label">Repeats</label>
+    <select class="input" id="due-repeat">
+      ${Object.keys(DUE_REPEAT_LABEL).map(k => `<option value="${k}" ${existing && existing.repeat === k || (!existing && k === 'monthly') ? 'selected' : ''}>${DUE_REPEAT_LABEL[k]}</option>`).join('')}
+    </select>
+    <label class="field-label">Notes (optional)</label>
+    <input class="input" id="due-notes" maxlength="120" value="${existing ? existing.notes : ''}">
+    <p class="error-text hidden" id="due-err"></p>
+    <div class="modal-actions"><button class="btn btn-ghost" id="due-cancel">Cancel</button><button class="btn btn-primary" id="due-save">Save</button></div>`);
+  $('#due-cancel').onclick = closeModal;
+  $('#due-save').onclick = async () => {
+    const name = $('#due-name').value.trim();
+    const amount = parseFloat($('#due-amount').value);
+    const remainingRaw = $('#due-remaining').value.trim();
+    const date = $('#due-date').value;
+    const err = $('#due-err');
+    if (!name) { err.textContent = 'Enter a name.'; err.classList.remove('hidden'); return; }
+    if (!(amount >= 0)) { err.textContent = 'Enter a valid amount.'; err.classList.remove('hidden'); return; }
+    if (!date) { err.textContent = 'Pick a next payment date.'; err.classList.remove('hidden'); return; }
+    const obj = {
+      name, amount,
+      remainingBalance: remainingRaw === '' ? null : parseFloat(remainingRaw),
+      nextPaymentDate: date,
+      repeat: $('#due-repeat').value,
+      notes: $('#due-notes').value.trim(),
+    };
+    try {
+      if (existing) await Store.updateDue(existing.id, obj); else await Store.addDue(obj);
+      closeModal(); if (onDone) onDone(); toast('Due saved.');
+    } catch (e) { err.textContent = e.message; err.classList.remove('hidden'); }
+  };
+}
+
+// Compact reminder banner shown at the top of the Dashboard for anything
+// overdue or due within the next 3 days — tap to jump to the full Dues list.
+// Renders nothing when there's nothing urgent, so it doesn't add clutter.
+function renderDuesBanner() {
+  const holder = $('#dues-banner');
+  if (!holder) return;
+  const data = D();
+  const urgent = M.upcomingDues(data.dues, 3);
+  if (!urgent.length) { holder.innerHTML = ''; return; }
+  const top = urgent[0];
+  const status = dueStatusLabel(top.due);
+  holder.innerHTML = `
+    <div class="dues-banner-row ${status.cls}" id="dues-banner-row">
+      <span class="db-ico">🔔</span>
+      <span class="db-text"><strong>${top.due.name}</strong> — ${fmt(top.due.amount)} · ${status.text}</span>
+      ${urgent.length > 1 ? `<span class="db-more">+${urgent.length - 1} more</span>` : ''}
+    </div>`;
+  $('#dues-banner-row', holder).onclick = () => openDuesList();
 }
 
 // ---------- Backup & Restore ----------

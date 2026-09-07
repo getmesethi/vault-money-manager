@@ -199,7 +199,7 @@ const Supa = (() => {
   // ---------------- Realtime ----------------
   function subscribeHousehold(householdId, onChange) {
     const channel = client.channel('household-' + householdId);
-    ['accounts','categories','transactions','budgets','recurring','upi_ids','household_members'].forEach(t => {
+    ['accounts','categories','transactions','budgets','recurring','upi_ids','household_members','dues'].forEach(t => {
       channel.on('postgres_changes', { event: '*', schema: 'public', table: t, filter: `household_id=eq.${householdId}` }, (payload) => onChange(t, payload));
     });
     channel.subscribe();

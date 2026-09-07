@@ -261,12 +261,32 @@ const Model = (() => {
     return rest + last3 + (dec ? '.' + dec : '');
   }
 
+  // Days between today and a due's next payment date (negative = overdue).
+  // Pure date math, no timezone surprises: both sides are local-midnight
+  // Date objects built the same way parseDate() builds them elsewhere.
+  function daysUntil(dateStr, today) {
+    const a = parseDate(today || todayStr()), b = parseDate(dateStr);
+    return Math.round((b - a) / 86400000);
+  }
+  // Active (non-archived) dues due within `withinDays` or already overdue,
+  // soonest first — feeds the Dashboard reminder banner and the Dues list's
+  // "upcoming" grouping.
+  function upcomingDues(dues, withinDays, today) {
+    const t = today || todayStr();
+    return dues
+      .filter(d => !d.archived)
+      .map(d => ({ due: d, days: daysUntil(d.nextPaymentDate, t) }))
+      .filter(x => x.days <= withinDays)
+      .sort((a, b) => a.days - b.days);
+  }
+
   return {
     uid, DEFAULT_CATEGORIES, PALETTE, ICON_CHOICES, PAYMENT_METHODS, ACCOUNT_TYPES,
     defaultCategories, emptyData, seedAccount,
     todayStr, fmtDate, nowTime, parseDate, humanDate, humanDateShort, humanTime, monthKey, monthLabel,
     rangeForPeriod, inRange, txnsInRange, sumCredit, sumDebit, sumBorrow, sumLend,
     accountBalance, totalBalance, categoryTotal, categoryNet, creditDebtOutstanding, investmentTotal,
-    expenseByCategory, monthlySeries, budgetSpent, isValidUpi, currencyFmt
+    expenseByCategory, monthlySeries, budgetSpent, isValidUpi, currencyFmt,
+    daysUntil, upcomingDues
   };
 })();
