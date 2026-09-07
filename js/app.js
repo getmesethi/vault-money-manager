@@ -829,10 +829,9 @@ function openTxnSheet(opts) {
       <label class="field-label">Description</label>
       <input class="input" id="tf-desc" placeholder="What was this transaction for?" value="${editing ? (editing.description||'') : (opts.description||'')}">
 
-      ${!editing ? `
       <label class="switch-row" style="margin-top:20px;"><span>🔔 Also track as a recurring Due</span><input type="checkbox" id="tf-track-due"></label>
       <div id="tf-due-fields" class="hidden">
-        <p class="muted" style="margin-top:-6px;">Adds this to your Dues list too — remaining balance, next payment date, and a reminder on the Dashboard when it's coming up.</p>
+        <p class="muted" style="margin-top:-6px;">${editing ? 'Adds a NEW entry to your Dues list (this transaction isn\'t already linked to one)' : 'Adds this to your Dues list too'} — remaining balance, next payment date, and a reminder on the Dashboard when it's coming up.</p>
         <label class="field-label">Remaining Balance (optional)</label>
         <input class="input" id="tf-due-remaining" type="number" inputmode="decimal" min="0" step="0.01" placeholder="e.g. total left on a loan">
         <label class="field-label">Next Payment Date</label>
@@ -841,7 +840,7 @@ function openTxnSheet(opts) {
         <select class="input" id="tf-due-repeat">
           ${Object.keys(DUE_REPEAT_LABEL).map(k => `<option value="${k}" ${k === 'monthly' ? 'selected' : ''}>${DUE_REPEAT_LABEL[k]}</option>`).join('')}
         </select>
-      </div>` : ''}
+      </div>
 
       <p class="error-text hidden" id="tf-error"></p>
       <button class="btn btn-primary btn-block" id="tf-save" style="margin-top:20px;">${editing ? 'Save Changes' : 'Save Transaction'}</button>
