@@ -630,7 +630,7 @@ function renderHome() {
   renderHomeTopbar();
   renderDuesBanner();
   renderTimeFilterRow();
-  renderSummaryScroller();
+  renderCategoryTotals();
   renderCategoryGrid();
   renderHomeCharts();
 }
@@ -657,48 +657,44 @@ async function renderHomeTopbar() {
   } catch (e) { /* leave the plain "Dashboard" title on any failure */ }
 }
 
-function renderSummaryScroller() {
+// Replaced the old Balance/Income/Expense/Savings/Debt swipeable card
+// scroller with a compact grid of per-category-type totals (per user
+// request: no standalone Balance card, just totals like Income/Dues/
+// Loans at a glance). Income/Expense/Borrowed/Lent/Savings respect the
+// active time-period filter same as before; Dues is a live outstanding
+// snapshot (not calendar-bound, so it isn't period-filtered).
+function renderCategoryTotals() {
   const data = D();
   const range = currentRange();
-  const allTxns = data.transactions;
-  const periodTxns = M.txnsInRange(allTxns, range);
-  const balance = M.totalBalance(data.accounts, allTxns); // always current, not period-filtered
-  const income = M.sumCredit(periodTxns);
-  const expense = M.sumDebit(periodTxns);
-  const savings = income - expense;
-  const debt = M.creditDebtOutstanding(data.accounts, data.categories, allTxns);
+  const periodTxns = M.txnsInRange(data.transactions, range);
+  const financialIds = new Set(data.categories.filter(c => c.type === 'financial').map(c => c.id));
+  const savingsLoans = periodTxns.filter(t => financialIds.has(t.categoryId)).reduce((s, t) => s + t.amount, 0);
+  const duesTotal = (data.dues || []).filter(d => !d.archived).reduce((s, d) => s + (d.remainingBalance !== null && d.remainingBalance !== undefined ? d.remainingBalance : d.amount), 0);
 
-  const cards = [
-    { label: 'TOTAL BALANCE', amount: balance, colors: ['#4f5bd5', '#6b74ea'], sub: [['Accounts', data.accounts.filter(a=>!a.archived).length + '']] },
-    { label: 'TOTAL INCOME', amount: income, colors: ['#1f9d55', '#3dbf74'], sub: [['Period', periodLabel()]] },
-    { label: 'TOTAL EXPENSE', amount: expense, colors: ['#d84f4f', '#e8746f'], sub: [['Period', periodLabel()]] },
-    { label: 'TOTAL SAVINGS', amount: savings, colors: ['#3573d4', '#5b93ea'], sub: [['Income − Expense', '']] },
-    { label: 'CREDIT / DEBT', amount: debt, colors: ['#8b5fd1', '#a67fe8'], sub: [['Outstanding', '']] },
+  const tiles = [
+    { label: 'Income', icon: '🟢', amount: M.sumCredit(periodTxns) },
+    { label: 'Expense', icon: '🔴', amount: M.sumDebit(periodTxns) },
+    { label: 'Borrowed', icon: '🔵', amount: M.sumBorrow(periodTxns) },
+    { label: 'Lent', icon: '🟣', amount: M.sumLend(periodTxns) },
+    { label: 'Dues', icon: '🔔', amount: duesTotal },
+    { label: 'Savings & Loans', icon: '🏦', amount: savingsLoans },
   ];
 
-  $('#summary-scroller').innerHTML = cards.map((c, i) => `
-    <div class="summary-card" style="background:linear-gradient(135deg, ${c.colors[0]}, ${c.colors[1]})" data-idx="${i}">
-      ${i === 0 ? `<button class="sc-eye" id="sc-eye-btn">👁</button>` : ''}
-      <div class="sc-label">${c.label}</div>
-      <div class="sc-amount num-anim" data-raw="${c.amount}">${fmt(c.amount)}</div>
-      <div class="sc-sub">${c.sub.map(s => `<span>${s[0]} ${s[1]}</span>`).join('')}</div>
-    </div>`).join('');
-
-  $('#summary-dots').innerHTML = cards.map((_, i) => `<span class="${i === S.summaryIdx ? 'active' : ''}"></span>`).join('');
-
-  const scroller = $('#summary-scroller');
-  scroller.onscroll = () => {
-    const idx = Math.round(scroller.scrollLeft / (scroller.firstElementChild.getBoundingClientRect().width + 12));
-    if (idx !== S.summaryIdx) { S.summaryIdx = idx; $all('#summary-dots span').forEach((d, i) => d.classList.toggle('active', i === idx)); }
-  };
-  scroller.scrollLeft = 0;
+  $('#totals-grid').innerHTML = `
+    <div class="tt-header"><button class="tt-eye" id="tt-eye-btn">👁</button></div>
+    <div class="tt-tiles">
+      ${tiles.map(t => `
+        <div class="total-tile">
+          <div class="tt-ico">${t.icon}</div>
+          <div class="tt-mid"><div class="tt-label">${t.label}</div><div class="tt-amt num-anim" data-raw="${t.amount}">${fmt(t.amount)}</div></div>
+        </div>`).join('')}
+    </div>
+  `;
 
   let hidden = false;
-  const eyeBtn = $('#sc-eye-btn');
-  if (eyeBtn) eyeBtn.onclick = (e) => {
-    e.stopPropagation();
+  $('#tt-eye-btn').onclick = () => {
     hidden = !hidden;
-    $all('.summary-card .sc-amount').forEach(el => { el.textContent = hidden ? '••••••' : fmt(parseFloat(el.dataset.raw)); });
+    $all('.total-tile .tt-amt').forEach(el => { el.textContent = hidden ? '••••••' : fmt(parseFloat(el.dataset.raw)); });
   };
 }
 

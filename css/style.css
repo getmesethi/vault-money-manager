@@ -160,23 +160,20 @@ input,select,textarea{ font-family:inherit; }
 }
 .chip.active{ background:var(--primary); border-color:var(--primary); color:#fff; }
 
-/* =========================== Summary scroller =========================== */
-.summary-scroller{
-  display:flex; gap:12px; overflow-x:auto; scroll-snap-type:x mandatory; padding:6px 2px 10px; scrollbar-width:none;
-}
-.summary-scroller::-webkit-scrollbar{ display:none; }
-.summary-card{
-  scroll-snap-align:start; flex:0 0 92%; max-width:400px; border-radius:var(--radius-lg); padding:16px 20px;
-  color:#fff; position:relative; overflow:hidden; box-shadow:var(--shadow-md);
-  transition:transform .2s ease;
-}
-.summary-card .sc-label{ font-size:12px; font-weight:800; letter-spacing:.06em; opacity:.85; text-transform:uppercase; }
-.summary-card .sc-amount{ font-size:26px; font-weight:800; margin-top:4px; letter-spacing:-.02em; }
-.summary-card .sc-sub{ margin-top:4px; display:flex; gap:14px; font-size:12px; opacity:.9; }
-.summary-card .sc-eye{ position:absolute; top:14px; right:14px; background:rgba(255,255,255,.22); border:none; color:#fff; width:28px; height:28px; border-radius:50%; cursor:pointer; }
-.scroller-dots{ display:flex; gap:6px; justify-content:center; margin-bottom:6px; }
-.scroller-dots span{ width:6px; height:6px; border-radius:50%; background:var(--border); transition:all .2s ease; }
-.scroller-dots span.active{ background:var(--primary); width:16px; border-radius:4px; }
+/* =========================== Category totals =========================== */
+/* Replaced the old swipeable Balance/Income/Expense/Savings/Debt card
+   scroller with a flat grid of per-category-type totals — no standalone
+   Balance card, just a glance-able Income/Expense/Borrowed/Lent/Dues/
+   Savings row. */
+.totals-grid{ padding-top:2px; margin-bottom:6px; }
+.tt-header{ display:flex; justify-content:flex-end; margin-bottom:6px; }
+.tt-eye{ background:var(--surface-2); border:none; color:var(--text-dim); width:26px; height:26px; border-radius:50%; cursor:pointer; font-size:13px; }
+.tt-tiles{ display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+.total-tile{ display:flex; align-items:center; gap:10px; background:var(--surface); border-radius:14px; padding:12px 14px; box-shadow:var(--shadow-sm); }
+.total-tile .tt-ico{ font-size:16px; flex:0 0 auto; }
+.total-tile .tt-mid{ min-width:0; }
+.total-tile .tt-label{ font-size:11px; font-weight:700; color:var(--text-dim); text-transform:uppercase; letter-spacing:.04em; }
+.total-tile .tt-amt{ font-size:16px; font-weight:800; margin-top:1px; }
 
 /* =========================== Category grid =========================== */
 /* Compact rectangular rows instead of a grid of squares — same info
@@ -449,7 +446,7 @@ input,select,textarea{ font-family:inherit; }
 /* =========================== Responsive: tablet/desktop =========================== */
 @media (min-width: 720px){
   .main-content{ padding:20px 28px 0; }
-  .summary-card{ flex-basis:340px; }
+  .tt-tiles{ grid-template-columns:repeat(3, 1fr); }
   .sheet{ left:50%; right:auto; bottom:24px; width:min(520px, 92vw); transform:translate(-50%, 120%); border-radius:24px; max-height:88vh; }
   .sheet.open{ transform:translate(-50%, 0); }
   .drawer{ box-shadow:var(--shadow-lg); }
