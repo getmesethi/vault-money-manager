@@ -455,7 +455,7 @@ function wireGlobalUI() {
   $('#drawer-overlay').onclick = closeDrawer;
   $('.drawer-head').onclick = () => { closeDrawer(); goNav('home'); };
   $all('.drawer-item[data-nav]').forEach(b => b.onclick = () => { closeDrawer(); goNav(b.dataset.nav); });
-  $all('.drawer-item[data-drawer]').forEach(b => b.onclick = () => { closeDrawer(); openDrawerPage(b.dataset.drawer); });
+  $all('.drawer-item[data-drawer]').forEach(b => b.onclick = () => { closeDrawerForNav(); openDrawerPage(b.dataset.drawer); });
   $('#btn-lock-now').onclick = () => { closeDrawer(); doLock(); };
   $('#btn-sign-out').onclick = () => { closeDrawer(); confirmDialog('Sign Out?', 'You will need to sign in again with your email/password or Google account to see your household\'s data.', 'Sign Out', async () => {
     Store.stopRealtime();
@@ -503,6 +503,24 @@ function closeDrawer() {
   consumeBackGuard();
 }
 
+// Used instead of closeDrawer() specifically when a drawer tap is about to
+// open a subpage (openSubpage() pushes its own guard). consumeBackGuard()'s
+// history.back() is ASYNC — its popstate doesn't fire until after this
+// click handler's synchronous code finishes. So closeDrawer()+openSubpage()
+// back-to-back races: the pending back() lands AFTER the subpage's
+// pushState, and the popstate handler (seeing a subpage now open) closes
+// it right back — a real, reproduced bug (tapping a drawer item flashed
+// its screen then instantly bounced to Dashboard, no error, since nothing
+// actually threw). Fix: don't consume the drawer's guard at all here; tell
+// the next openSubpage() call to silently reuse it instead of pushing a
+// second one, so exactly one guard still covers the whole transaction.
+function closeDrawerForNav() {
+  $('#drawer').classList.remove('open');
+  $('#drawer-overlay').classList.remove('show');
+  setTimeout(() => $('#drawer-overlay').classList.add('hidden'), 250);
+  S._reuseGuardForNextSubpage = true;
+}
+
 function renderDrawerHead() {
   const p = prefs();
   const h = Store.household();
@@ -533,7 +551,13 @@ function goNav(name) {
 // SUBPAGE NAVIGATION (category detail, account detail, editors)
 // ===========================================================
 function openSubpage(title, renderFn) {
-  if (S.subpageStack.length === 0) pushBackGuard(); // one guard per subpage *session*, not per level
+  if (S.subpageStack.length === 0) {
+    // See closeDrawerForNav(): when set, a guard is already sitting on the
+    // history stack from opening the drawer — reuse it instead of pushing
+    // a second one (which is what caused the race).
+    if (S._reuseGuardForNextSubpage) S._reuseGuardForNextSubpage = false;
+    else pushBackGuard(); // one guard per subpage *session*, not per level
+  }
   S.subpageStack.push(renderFn);
   $all('.view').forEach(v => v.classList.add('hidden'));
   $('#view-subpage').classList.remove('hidden');
