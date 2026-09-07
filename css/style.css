@@ -412,7 +412,8 @@ input,select,textarea{ font-family:inherit; }
 .upi-card .upi-actions{ display:flex; gap:8px; margin-top:10px; }
 
 /* =========================== Dues =========================== */
-.due-card{ background:var(--surface); border-radius:16px; padding:14px 16px; margin-bottom:10px; box-shadow:var(--shadow-sm); }
+.due-card{ background:var(--surface); border-radius:16px; padding:14px 16px; margin-bottom:10px; box-shadow:var(--shadow-sm); cursor:pointer; }
+.due-card:active{ transform:scale(.99); }
 .due-top{ display:flex; justify-content:space-between; align-items:baseline; gap:8px; }
 .due-name{ font-weight:700; font-size:14.5px; }
 .due-amt{ font-weight:800; font-size:15px; }

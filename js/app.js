@@ -2436,7 +2436,7 @@ function openDuesList() {
       $('#due-list', root).innerHTML = dues.length ? dues.map(d => {
         const status = dueStatusLabel(d);
         return `
-        <div class="due-card">
+        <div class="due-card" data-due="${d.id}">
           <div class="due-top">
             <div class="due-name">${d.name}</div>
             <div class="due-amt">${fmt(d.amount)}</div>
@@ -2454,6 +2454,12 @@ function openDuesList() {
         </div>`;
       }).join('') : `<div class="empty-hint"><div style="font-weight:800; font-size:16px; color:var(--text-dim); margin-bottom:6px;">No Dues</div>Add a bill or EMI to get reminders here and on your Dashboard.</div>`;
 
+      // Tapping anywhere on the card (not one of its own buttons) opens the
+      // same details/edit view as the explicit "Edit" button.
+      $all('.due-card', root).forEach(card => card.onclick = (e) => {
+        if (e.target.closest('.due-actions')) return;
+        openDueEditor(card.dataset.due, draw);
+      });
       $all('[data-paid]', root).forEach(b => b.onclick = async () => {
         try { await Store.markDuePaid(b.dataset.paid); toast('Marked paid.'); draw(); }
         catch (e) { toast(e.message); }
