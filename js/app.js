@@ -910,6 +910,13 @@ function openReduceSheet(categoryId) {
 }
 
 async function saveTxnFromSheet(ctx) {
+  // Same double-tap class of bug fixed earlier for household creation: this
+  // sets #tf-save.disabled = true further down, but never checked it first —
+  // a genuine rapid double-tap dispatches two click events before the first
+  // handler's disabling takes effect, and BOTH would run the full save flow
+  // (confirmed live: two near-identical dues created ~1s apart). Bail
+  // immediately if a save is already in flight.
+  if ($('#tf-save').disabled) return;
   const amount = parseFloat($('#tf-amount').value);
   const categoryId = $('#tf-category').value;
   const method = $('#tf-method').value;
@@ -935,25 +942,18 @@ async function saveTxnFromSheet(ctx) {
   const type = ctx.curType();
   $('#tf-save').disabled = true;
   try {
-    if (ctx.editing) {
-      await Store.updateTransaction(ctx.editing.id, { type, amount, categoryId, paymentMethod: method, accountId, date, time, description, upiId });
-    } else {
-      await Store.addTransaction({
-        type, amount, categoryId, paymentMethod: method, accountId, date, time, description,
-        upiId, isReversal: !!ctx.isReversal
-      });
-    }
-    if (method === 'UPI' && upiId && !data.upiIds.some(u => u.upiId === upiId)) {
-      await Store.addUpi({ upiId, provider: '', linkedAccountName: '' });
-    }
+    // Create the linked Due FIRST (if requested) so its id can be stored
+    // directly on the transaction — that's what lets the transaction detail
+    // screen show its balance/due date later.
     let trackedDue = false;
+    let dueId;
     const trackDueBox = $('#tf-track-due');
     if (trackDueBox && trackDueBox.checked) {
       const cat = data.categories.find(c => c.id === categoryId);
       const remainingRaw = $('#tf-due-remaining').value.trim();
       const dueDate = $('#tf-due-date').value || date;
       try {
-        await Store.addDue({
+        const due = await Store.addDue({
           name: (cat ? cat.name : description) || 'Due',
           amount,
           remainingBalance: remainingRaw === '' ? null : parseFloat(remainingRaw),
@@ -961,8 +961,23 @@ async function saveTxnFromSheet(ctx) {
           repeat: $('#tf-due-repeat').value,
           notes: description || '',
         });
+        dueId = due.id;
         trackedDue = true;
-      } catch (e) { /* transaction already saved; surface via toast, don't block the flow */ toast('Transaction saved, but the Due could not be added: ' + e.message); }
+      } catch (e) { toast('Could not add the Due: ' + e.message); }
+    }
+
+    if (ctx.editing) {
+      const patch = { type, amount, categoryId, paymentMethod: method, accountId, date, time, description, upiId };
+      if (dueId) patch.dueId = dueId; // else: leave whatever it already had untouched
+      await Store.updateTransaction(ctx.editing.id, patch);
+    } else {
+      await Store.addTransaction({
+        type, amount, categoryId, paymentMethod: method, accountId, date, time, description,
+        upiId, isReversal: !!ctx.isReversal, dueId
+      });
+    }
+    if (method === 'UPI' && upiId && !data.upiIds.some(u => u.upiId === upiId)) {
+      await Store.addUpi({ upiId, provider: '', linkedAccountName: '' });
     }
     closeTxnSheet();
     showSuccess(`✓ Transaction ${ctx.editing ? 'Updated' : 'Added'}\n${fmt(amount)} ${(TXN_TYPE_META[type] || TXN_TYPE_META.debit).label}${trackedDue ? ' · added to Dues' : ''}`);
@@ -1136,6 +1151,7 @@ function openTransactionDetail(txnId) {
     const meta = TXN_TYPE_META[t.type] || TXN_TYPE_META.debit;
     const tagColors = { credit: ['var(--green)','var(--green-bg)'], debit: ['var(--red)','var(--red-bg)'], borrow: ['var(--blue)','var(--blue-bg)'], lend: ['var(--purple)','var(--purple-bg)'] };
     const [tColor, tBg] = tagColors[t.type] || tagColors.debit;
+    const linkedDue = t.dueId ? (data.dues || []).find(d => d.id === t.dueId) : null;
     root.innerHTML = `
       <div class="txn-detail-amt">
         <div class="tda-num" style="color:${tColor}">${meta.sign}${fmt(t.amount)}</div>
@@ -1150,11 +1166,20 @@ function openTransactionDetail(txnId) {
         <div class="kv-row"><span class="kv-k">Account</span><span class="kv-v">${acct.name}</span></div>
         <div class="kv-row"><span class="kv-k">Description</span><span class="kv-v">${t.description || '—'}</span></div>
       </div>
+      ${linkedDue ? `
+      <div class="sep-title">Linked Due</div>
+      <div class="kv-list">
+        <div class="kv-row"><span class="kv-k">Name</span><span class="kv-v">${linkedDue.name}</span></div>
+        ${linkedDue.remainingBalance !== null ? `<div class="kv-row"><span class="kv-k">Remaining Balance</span><span class="kv-v">${fmt(linkedDue.remainingBalance)}</span></div>` : ''}
+        <div class="kv-row"><span class="kv-k">Next Payment</span><span class="kv-v">${M.humanDate(linkedDue.nextPaymentDate)}</span></div>
+      </div>
+      <button class="btn btn-ghost btn-block" id="td-view-due" style="margin-bottom:10px;">🔔 View / Edit Due</button>` : ''}
       <div class="modal-actions">
         <button class="btn btn-ghost btn-block" id="td-edit">Edit</button>
         <button class="btn btn-danger btn-block" id="td-delete">Delete</button>
       </div>`;
     $('#td-edit', root).onclick = () => openTxnSheet({ txnId: t.id });
+    if (linkedDue) $('#td-view-due', root).onclick = () => openDueEditor(linkedDue.id, () => openDuesList());
     $('#td-delete', root).onclick = () => confirmDialog('Delete Transaction?', 'This cannot be undone. The transaction will be permanently removed from your records.', 'Delete', async () => {
       await Store.deleteTransaction(t.id);
       showSuccess('🗑 Transaction Deleted');

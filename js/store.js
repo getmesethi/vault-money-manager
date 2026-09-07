@@ -146,7 +146,7 @@ const Store = (() => {
     transactions: r => ({
       id: r.id, type: r.type, amount: Number(r.amount), categoryId: r.category_id, accountId: r.account_id,
       paymentMethod: r.payment_method, date: r.date, time: r.time || '', description: r.description || '',
-      upiId: r.upi_id || '', isReversal: r.is_reversal, fromRecurring: r.from_recurring,
+      upiId: r.upi_id || '', isReversal: r.is_reversal, fromRecurring: r.from_recurring, dueId: r.due_id || null,
       createdAt: new Date(r.created_at).getTime(), updatedAt: new Date(r.updated_at).getTime()
     }),
     budgets: r => ({ id: r.id, categoryId: r.category_id, amount: Number(r.amount), period: r.period }),
@@ -164,7 +164,7 @@ const Store = (() => {
     transactions: t => ({
       household_id: _household.id, account_id: t.accountId, category_id: t.categoryId, type: t.type, amount: t.amount,
       payment_method: t.paymentMethod, date: t.date, time: t.time || null, description: t.description || null,
-      upi_id: t.upiId || null, is_reversal: !!t.isReversal, from_recurring: t.fromRecurring || null,
+      upi_id: t.upiId || null, is_reversal: !!t.isReversal, from_recurring: t.fromRecurring || null, due_id: t.dueId || null,
       created_by: currentUser() ? currentUser().id : null, updated_at: new Date().toISOString()
     }),
     budgets: b => ({ household_id: _household.id, category_id: b.categoryId, amount: b.amount, period: b.period || 'monthly' }),
